@@ -77,4 +77,4 @@ def load_image(data_params, frame_idx, grayscale=False):
     if image is None:
         print(f"Failed to load image: {image_path}")
         return None
-    return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if grayscale else image
+    return cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if grayscale else image

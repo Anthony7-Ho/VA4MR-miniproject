@@ -1,10 +1,11 @@
 import data_loader
+import pipeline
 import sys
 import cv2
 
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
-    ds = 1
+    ds = 2
 
     paths = {
         "kitti_path": "./Data/kitti05",
@@ -28,6 +29,12 @@ def main():
         return
     
     print("Bootstrap images loaded successfully.")
+
+    K = data_params['K']
+
+    print("Initializing 3D landmarks...")
+    points_3d, R, t, inliers1, inliers2 = pipeline.initialize_3d_landmarks(img0, img1, K)
+    print(f"Initialized {len(points_3d)} 3D landmarks.")
 
     cv2.imshow("Bootstrap Image 0", img0)
     cv2.imshow("Bootstrap Image 1", img1)
