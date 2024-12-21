@@ -1,7 +1,6 @@
+import cv2
 import data_loader
 import pipeline
-import sys
-import cv2
 
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
@@ -20,14 +19,14 @@ def main():
     except AssertionError as e:
         print("Dataloading failed with error: ", e)
         return
-    
+
     img0 = data_loader.load_image(data_params, bootstrap_frames[0], grayscale=True)
     img1 = data_loader.load_image(data_params, bootstrap_frames[1], grayscale=True)
 
     if img0 is None or img1 is None:
         print("Bootstrap images could not be loaded.")
         return
-    
+
     print("Bootstrap images loaded successfully.")
 
     K = data_params['K']
@@ -51,9 +50,9 @@ def main():
         # Show the current frame
         cv2.imshow("Current Frame", image)
         cv2.waitKey(30)  # Wait for 30ms before showing the next frame
-        
 
-    
+
+
 
 if __name__ == '__main__':
     main()
