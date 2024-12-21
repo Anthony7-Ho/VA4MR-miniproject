@@ -2,6 +2,10 @@ import cv2
 import data_loader
 import pipeline
 
+from utils import randomfunction
+
+randomfunction(number=0.5)
+
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
     ds = 2
