@@ -11,7 +11,7 @@ def visualize_keypoints(image, keypoints, window_name="Keypoints"):
     keypoints: Detected keypoints
     window_name: Name of the display window
     """
-    img_with_keypoints = cv2.drawKeypoints(image, keypoints, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    img_with_keypoints = cv2.drawKeypoints(image, keypoints, None, color = (0, 255, 0), flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
     cv2.imshow(window_name, img_with_keypoints)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
@@ -45,5 +45,25 @@ def visualize_3d_landmarks(points_3d):
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
     plt.show()
+
+
+def visualize_keypoints_with_inliers(image, keypoints, inliers_mask, window_name="Keypoints and Inliers"):
+    """
+    """
+    # Convert grayscale image to BGR for colored drawing
+    output_image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+    # Iterate through keypoints and draw them
+    for i, kp in enumerate(keypoints):
+        pt = (int(kp.pt[0]), int(kp.pt[1]))
+        if inliers_mask is not None and inliers_mask[i]: 
+            cv2.circle(output_image, pt, radius=2, color=(0, 255, 0), thickness=-1)  # Green circle: inlier
+        else:  
+            cv2.circle(output_image, pt, radius=2, color=(0, 0, 255), thickness=-1)  # Red circle: outlier
+
+    # Display the image with keypoints and inliers
+    cv2.imshow(window_name, output_image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
 
