@@ -34,7 +34,6 @@ def plot_matches(img1, img2, keypoints1, keypoints2, matches, mask, title="Featu
     plt.axis("off")
     plt.show()
 
-
 def plot_optical_flow(img1, img2, pts1, pts2, title="Optical Flow"):
     """Visualize optical flow between two frames"""
     # Create a mask for drawing
