@@ -3,8 +3,9 @@ from dataclasses import dataclass
 from typing import Any
 import numpy as np
 import cv2
+from matplotlib import pyplot as plt
 
-from plotting import plot_3d_scene
+from plotting import plot_3d_scene, ScenePlotter
 from functions import (
     detect_features,
     match_features,
@@ -32,7 +33,9 @@ class KeyframeData:
     points_3d: np.ndarray | None = None
     frame_data: FrameData | None = None
     inliers1: np.ndarray | None = None
+    inlier_desc1: np.ndarray | None = None
     inliers2: np.ndarray | None = None
+    inlier_desc2: np.ndarray | None = None
 
 class VisualOdometry:
     """Visual Odometry pipeline"""
@@ -77,9 +80,9 @@ class VisualOdometry:
         curr_kp, curr_desc = detect_features(curr_frame)
 
         # Match features between current and previous frame
-        _, pts1, pts2 = match_features(
-            self.current_frame.keypoints,
-            self.current_frame.descriptors,
+        _, desc1, desc2, pts1, pts2 = match_features(
+            self.current_keyframe.frame_data.keypoints,
+            self.current_keyframe.frame_data.descriptors,
             curr_kp,
             curr_desc,
             use_lowes
@@ -89,12 +92,14 @@ class VisualOdometry:
         _, R_21, t_21, mask = estimate_pose_from_2d2d(pts1, pts2, self.K)
         inliers1 = pts1[mask.ravel() == 1]
         inliers2 = pts2[mask.ravel() == 1]
+        inlier_desc1 = desc1[mask.ravel() == 1]
+        inlier_desc2 = desc2[mask.ravel() == 1]
 
         # Triangulate points using relative pose
         points_3d = triangulate_points(
             self.K,
-            self.current_frame.rotation,
-            self.current_frame.translation,
+            self.current_keyframe.frame_data.rotation,
+            self.current_keyframe.frame_data.translation,
             R_21,   # Use relative pose for triangulation
             t_21,
             inliers1,
@@ -106,8 +111,9 @@ class VisualOdometry:
         R_12 = R_21.T
         t_12 = -R_21.T @ t_21
         # Transform to world frame
-        R_curr = self.current_frame.rotation @ R_12
-        t_curr = self.current_frame.translation + self.current_frame.rotation @ t_12
+        R_curr = self.current_keyframe.frame_data.rotation @ R_12
+        t_curr = (self.current_keyframe.frame_data.translation +
+              self.current_keyframe.frame_data.rotation @ t_12)
 
         # Check keyframe criteria
         keyframe_distance = get_keyframe_distance(t_21)
@@ -133,7 +139,9 @@ class VisualOdometry:
                 points_3d=points_3d,
                 frame_data=frame_data,
                 inliers1=inliers1,
-                inliers2=inliers2
+                inlier_desc1=inlier_desc1,
+                inliers2=inliers2,
+                inlier_desc2=inlier_desc2
             )
 
         return KeyframeData(is_keyframe=False)
@@ -182,7 +190,7 @@ class VisualOdometry:
 
                 # Update state with new keyframe
                 self.current_keyframe = result
-                self.current_frame = result.frame_data
+                self.current_keyframe.frame_data = result.frame_data
                 self.landmarks = result.points_3d
                 return True
 
@@ -223,9 +231,86 @@ class VisualOdometry:
             title="3D Scene Reconstruction"
         )
 
+    def run_pnp(self, matches: list[cv2.DMatch], matched_pts_current_frame: np.ndarray) -> None:
+        points_3d = self.landmarks
+
+        # Get 3D points from the current frame
+        matched_3d_indices = [m.queryIdx for m in matches]
+        matched_3d_points = points_3d[matched_3d_indices]
+
+        dist_coeffs = np.zeros((4, 1))  # Assuming no lens distortion
+        success, rvec, tvec, inliers = cv2.solvePnPRansac(
+            matched_3d_points,
+            matched_pts_current_frame,
+            self.K,
+            dist_coeffs,
+            flags=cv2.SOLVEPNP_P3P # TODO: Check this
+        )
+
+        points_3d_percentage = len(matched_3d_points) /len(points_3d) * 100
+        inlier_percent = len(inliers) / len(matched_3d_points) * 100
+        final_percentage = len(inliers) / len(points_3d) * 100
+        statistics = (points_3d_percentage, inlier_percent, final_percentage)
+
+        if success:
+            R, _ = cv2.Rodrigues(rvec)  # Convert rotation vector to matrix
+            t = tvec
+            return success, R, t, statistics
+        return success, None, None, None
+
+    def main_loop(self, data_params):
+        """Main loop for the VO pipeline"""
+
+        starting_frame = self.current_keyframe.frame_data.frame_idx
+
+        scene_plotter = ScenePlotter()
+        scene_plotter.initialize_plot()
+
+        for i in range(starting_frame+1, data_params["last_frame"] + 1):
+            img_i = data_loader.load_image(data_params, i, grayscale=True)
+            kp_i, desc_i = detect_features(img_i)
+            # kp_keyframe = self.current_keyframe.inliers2
+            desc_keyframe = self.current_keyframe.inlier_desc2
+
+            bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
+            matches = bf.match(desc_keyframe, desc_i)
+            matches = sorted(matches, key=lambda x: x.distance)
+            pts2 = np.float32([kp_i[m.trainIdx].pt for m in matches])
+
+            success, R_W_C, t_W_C, statistics = self.run_pnp(matches, pts2)
+            # Retrieve camera pose in world frame
+            R_C_W = R_W_C.T
+            t_C_W = -R_W_C.T @ t_W_C
+
+            print()
+            print(f"Frame {i}:")
+            print(f"Success: {success}")
+            print(30*"-")
+            print(f"Points 3D percentage: {statistics[0]:.2f}%")
+            print(f"Inlier percentage: {statistics[1]:.2f}%")
+            print(f"Final percentage: {statistics[2]:.2f}%")
+            print(30*"-")
+            print(f"Norm of translation vector: {np.linalg.norm(t_C_W)}")
+            print(f"Current pose coordinates: {t_C_W.flatten()}")
+
+
+            poses = [np.hstack([R_C_W, t_C_W])]
+            scene_plotter.update_plot(self.landmarks, poses, self.K,
+                                    title=f"Frame {i}")
+            plt.pause(0.1)  # Add small pause to allow for visualization
+
+            # # --- Main Loop Keyframe recompute ---
+            # if statistics[2] <= 30:
+            #     print("Recomputing keyframe...")
+            #     result = self.select_keyframe(img_i, i, use_lowes=False)
+            #     if result.is_keyframe:
+            #         self.current_keyframe = result
+            #         self.landmarks = result.points_3d
+
+
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
-    ds = 0
+    ds = 2
 
     paths = {
         "kitti_path": "./Data/kitti05",
@@ -246,6 +331,7 @@ def main():
     vo = VisualOdometry(K)
     vo.initialization(data_params, use_lowes=False, plotting=True, verbose=True)
 
+    vo.main_loop(data_params)
 
 if __name__ == "__main__":
     main()

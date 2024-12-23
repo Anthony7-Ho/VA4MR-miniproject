@@ -170,3 +170,108 @@ def _plot_3d_reconstruction(ax, points_3d, poses, title):
     ax.set_zlabel("Z")
     ax.set_box_aspect([1, 1, 1])
     ax.view_init(elev=0, azim=270)
+
+
+# ---------------------------------------------
+class ScenePlotter:
+    def __init__(self):
+        plt.ion()
+        self.fig = plt.figure(figsize=(10, 6))
+        self.ax = self.fig.add_subplot(111, projection='3d')
+        self.scatter = None
+        self.quiver_objects = []
+        self.fov_lines = []
+
+    def initialize_plot(self):
+        self.ax.set_xlabel("X")
+        self.ax.set_ylabel("Y")
+        self.ax.set_zlabel("Z")
+        self.ax.set_box_aspect([1, 1, 1])
+        self.ax.view_init(elev=0, azim=270)
+
+    def update_plot(self, points_3d, poses, K, title="3D Scene"):
+        # Clear previous camera poses and FOV
+        for quiver in self.quiver_objects:
+            quiver.remove()
+        self.quiver_objects = []
+
+        for line in self.fov_lines:
+            line.remove()
+        self.fov_lines = []
+
+        # Update scatter plot
+        if self.scatter is not None:
+            self.scatter.remove()
+        self.scatter = self.ax.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2],
+                                     c="blue", marker=".", s=5)
+
+        # Plot camera poses
+        colors = ["r", "g", "b"]
+        for pose in poses:
+            position = pose[:3, 3]
+            for i, color in enumerate(colors):
+                direction = pose[:3, i] * 0.5
+                quiver = self.ax.quiver(position[0], position[1], position[2],
+                                      direction[0], direction[1], direction[2],
+                                      color=color, length=1)
+                self.quiver_objects.append(quiver)
+
+            # Add FOV visualization
+            self.fov_lines.extend(self.plot_camera_fov(pose, K, near=0.1, far=1.0))
+
+        # Update title
+        # self.ax.texts.clear()
+        # self.ax.text2D(0.5, 0.85, title, transform=self.ax.transAxes,
+        #               ha='center', fontsize=12)
+
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+        # plt.savefig("plot_3d_scene.png")
+        
+    def plot_camera_fov(self, pose, K, near=0.1, far=1.0):
+        R = pose[:3, :3]
+        t = pose[:3, 3]
+        
+        # Calculate FOV from K matrix
+        fx = K[0, 0]
+        fy = K[1, 1]
+        width = int(2 * K[0, 2])
+        height = int(2 * K[1, 2])
+        
+        fov_x = 2 * np.arctan(width / (2 * fx))
+        fov_y = 2 * np.arctan(height / (2 * fy))
+        
+        # Calculate frustum corners
+        x_near = near * np.tan(fov_x/2)
+        y_near = near * np.tan(fov_y/2)
+        x_far = far * np.tan(fov_x/2)
+        y_far = far * np.tan(fov_y/2)
+        
+        points_cam = np.array([
+            [-x_near, -y_near, near],
+            [x_near, -y_near, near],
+            [x_near, y_near, near],
+            [-x_near, y_near, near],
+            [-x_far, -y_far, far],
+            [x_far, -y_far, far],
+            [x_far, y_far, far],
+            [-x_far, y_far, far]
+        ])
+        
+        points_world = (R @ points_cam.T + t.reshape(3, 1)).T
+        
+        lines = [
+            [0, 1], [1, 2], [2, 3], [3, 0],
+            [4, 5], [5, 6], [6, 7], [7, 4],
+            [0, 4], [1, 5], [2, 6], [3, 7]
+        ]
+        
+        line_objects = []
+        for line in lines:
+            p1 = points_world[line[0]]
+            p2 = points_world[line[1]]
+            line_obj, = self.ax.plot([p1[0], p2[0]], [p1[1], p2[1]], 
+                                   [p1[2], p2[2]], 'k--', alpha=0.5)
+            line_objects.append(line_obj)
+            
+        return line_objects

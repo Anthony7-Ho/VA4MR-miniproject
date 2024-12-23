@@ -27,9 +27,9 @@ def detect_features(image: np.ndarray) -> tuple[list[cv2.KeyPoint], np.ndarray]:
 
 def match_features(
     kp1: list[cv2.KeyPoint],
-    des1: np.ndarray,
+    desc1: np.ndarray,
     kp2: list[cv2.KeyPoint],
-    des2: np.ndarray,
+    desc2: np.ndarray,
     use_lowes: bool = False,
 ) -> tuple[list[cv2.DMatch], np.ndarray, np.ndarray]:
     """Match features between two images.
@@ -42,13 +42,13 @@ def match_features(
     """
     if use_lowes:
         bf = cv2.BFMatcher(cv2.NORM_L2)
-        matches = bf.knnMatch(des1, des2, k=2)
+        matches = bf.knnMatch(desc1, desc2, k=2)
         ratio_thresh = 0.75
         good_matches = [m for m, n in matches if m.distance < ratio_thresh * n.distance]
         good_matches = sorted(good_matches, key=lambda x: x.distance)
     else:
         bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
-        good_matches = bf.match(des1, des2)
+        good_matches = bf.match(desc1, desc2)
         good_matches = sorted(good_matches, key=lambda x: x.distance)
     # good_matches: List of cv2.DMatch objects
     # cv2.DMatch attributes:
@@ -61,7 +61,10 @@ def match_features(
     pts1 = np.float32([kp1[m.queryIdx].pt for m in good_matches])
     pts2 = np.float32([kp2[m.trainIdx].pt for m in good_matches])
 
-    return good_matches, pts1, pts2
+    desc1 = np.float32([desc1[m.queryIdx] for m in good_matches])
+    desc2 = np.float32([desc2[m.trainIdx] for m in good_matches])
+
+    return good_matches, desc1, desc2, pts1, pts2
 
 
 def estimate_pose_from_2d2d(
