@@ -57,6 +57,7 @@ def plot_optical_flow(img1, img2, pts1, pts2, title="Optical Flow"):
     plt.show()
 
 def plot_features_and_matches(img1, img2, pts1, pts2, matched_pts1, matched_pts2):
+    """Plot correspondences between two images and the matched points on the second image"""
     # Plot images on top of each other (alpha blending)
     plt.figure(figsize=(10, 5))
     # plt.imshow(img1, cmap='gray', alpha=0.6)
@@ -102,7 +103,7 @@ def plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, ax=
     Visualizes keypoints and feature matches on an image.
     
     Args:
-        img (np.ndarray): Input image
+        img (np.ndarray): Input image (the second image)
         keypoints (list): List of cv2.KeyPoint objects
         matched_points (np.ndarray): Array of matched point coordinates
         inliers1 (np.ndarray): Inlier points from first image
@@ -119,7 +120,7 @@ def plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, ax=
     # Plot matched points
     if matched_points.size > 0:
         ax.scatter(matched_points[:, 0], matched_points[:, 1],
-                  marker='x', color='red', label='Matched Keypoints')
+                  marker='x', color='red', label=f'Matched Keypoints: {len(matched_points)}')
 
     # Plot all keypoints
     if keypoints:
@@ -132,13 +133,13 @@ def plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, ax=
         ax.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]],
                 'g-', linewidth=2)
 
-    # Add inlier count and matched keypoints count
-    ax.text(0.05, 0.90, f'Matched Keypoints: {len(matched_points)}\nInliers: {len(inliers1)}',
-            transform=ax.transAxes, fontsize=12,
-            bbox={"facecolor": 'white', "alpha": 0.5})
+    # # Add inlier count and matched keypoints count
+    # ax.text(0.05, 0.90, f'Matched Keypoints: {len(matched_points)}\nInliers: {len(inliers1)}',
+    #         transform=ax.transAxes, fontsize=12,
+    #         bbox={"facecolor": 'white', "alpha": 0.5})
 
     # Add legend
-    ax.plot([], [], 'g-', linewidth=2, label='Inliers')
+    ax.plot([], [], 'g-', linewidth=2, label=f'Inliers: {len(inliers1)}')
     ax.legend()
     ax.set_title("Feature Matches")
     ax.axis("off")

@@ -71,7 +71,7 @@ def match_features(
 
 
 def estimate_pose_from_2d2d(
-    pts1: np.ndarray, pts2: np.ndarray, K: np.ndarray
+    pts1: np.ndarray, pts2: np.ndarray, K: np.ndarray, verbose: bool = False
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Estimate pose from 2D-2D correspondences using the essential matrix.
     Returns:
@@ -81,21 +81,26 @@ def estimate_pose_from_2d2d(
         pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0
     )
     # Check if the essential matrix E has rank 2
-    print("Essential matrix rank:", np.linalg.matrix_rank(E))
-    U, S, Vt = np.linalg.svd(E)
-    S[2] = 0  # Keep original scale of first two values
-    E = U @ np.diag(S) @ Vt
-    print("Essential matrix rank after SVD:", np.linalg.matrix_rank(E))
-    # if np.linalg.matrix_rank(E) != 2:
-    #     raise ValueError("Essential matrix does not have rank 2")
+    rank = np.linalg.matrix_rank(E)
+    if rank != 2:
+        U, S, Vt = np.linalg.svd(E)
+        S[2] = 0  # Keep original scale of first two values
+        E = U @ np.diag(S) @ Vt
+    
+    # Verbose output
+    if verbose:
+        print("Essential matrix rank:", rank)
+        if rank != 2:
+            print("Essential matrix rank after SVD:", np.linalg.matrix_rank(E))
 
     # Use only inliers from essential matrix for pose recovery
     inlier_pts1 = pts1[mask_essential.ravel() == 1]
     inlier_pts2 = pts2[mask_essential.ravel() == 1]
 
     # Recover pose
-    # Returns R,t: KF2 relative to KF1
-    # R_21, t_21: transforms points from KF1 to KF2
+    # Returns R_21, t_21: transformation from frame 2 to frame 1
+    # R_21 rotates points from frame 2 to frame 1
+    # t_21 is the position of camera 1 as seen from camera 2
     _, R_21, t_21, mask_pose = cv2.recoverPose(E, inlier_pts1, inlier_pts2, K)
 
     # Combine both masks to get final inliers
@@ -124,7 +129,7 @@ def triangulate_points(
     """
     P1 = K @ np.hstack([R1, t1])
     P2 = K @ np.hstack([R2, t2])
-   
+
     points4D = cv2.triangulatePoints(P1, P2, pts1.T, pts2.T)
     # Convert from homogeneous to Euclidean coordinates
     points3D = (points4D[:3, :] / points4D[3:4, :]).T
@@ -145,13 +150,21 @@ def get_average_depth(points3D: np.ndarray, R: np.ndarray, t: np.ndarray) -> flo
     """Calculates the average depth of 3D points in the camera frame.
     Args:
         points3D: 3D points in the world frame
-        R: Rotation matrix
-        t: Translation vector
+        R: Rotation matrix from world to camera frame
+        t: Translation vector from world to camera frame
     Returns:
         Average depth of 3D points in the camera frame
     """
-    points3D_camera = (R @ points3D.T) + t
+    # Inverse transform to get points in camera frame
+    R_cam_to_world = R.T
+    t_cam_to_world = -R.T @ t
+
+    points3D_camera = (R_cam_to_world @ points3D.T) + t_cam_to_world.reshape(3,1)
     points3D_camera = points3D_camera.T
+
+    # old code, likely wrong (not 100% sure yet)
+    # points3D_camera = (R @ points3D.T) + t
+    # points3D_camera = points3D_camera.T
 
     # Extract depths (z-coordinates)
     depths = points3D_camera[:, 2]
@@ -222,25 +235,23 @@ class VisualOdometry:
         for i in range(1, data_params["last_frame"] + 1):
             img_i = data_loader.load_image(data_params, i, grayscale=True)
             kp_i, des_i = detect_features(img_i)
-            # plot_features(img_i, kp_i) # TODO: remove
-            matches, pts1, pts2 = match_features(self.kp_prev, self.desc_prev, kp_i, des_i, use_lowes)
+            _, pts1, pts2 = match_features(self.kp_prev, self.desc_prev, kp_i, des_i, use_lowes)
 
             # estimte_pose returns relative pose of the second camera wrt the first camera
             E, R_21, t_21, mask = estimate_pose_from_2d2d(pts1, pts2, self.K)
             inliers1 = pts1[mask.ravel() == 1]
             inliers2 = pts2[mask.ravel() == 1]
 
-            # plot_matches(img0, img_i, self.kp_prev, kp_i, matches, mask) # TODO: remove
-            # plot_features_and_matches(img0, img_i, pts1, pts2, inliers1, inliers2)
-
-            # Absolute pose of the second camera
-            R_curr = self.R_prev @ R_21
-            t_curr = self.t_prev + self.R_prev @ t_21
-
             # Project points into world frame
             points_3d = triangulate_points(
-                self.K, self.R_prev, self.t_prev, R_curr, t_curr, inliers1, inliers2
+                self.K, self.R_prev, self.t_prev, R_21, t_21, inliers1, inliers2
             )
+
+            # Recover absolute pose of the second camera (in world frame)
+            R_12 = R_21.T
+            t_12 = -R_21.T @ t_21
+            R_curr = self.R_prev @ R_12
+            t_curr = self.t_prev + self.R_prev @ t_12
 
             keyframe_distance = get_keyframe_distance(t_21)
             average_depth = get_average_depth(points_3d, R_curr, t_curr)
@@ -257,21 +268,21 @@ class VisualOdometry:
                 print(f"Previous keyframe: {self.curr_keyframe}, Current keyframe: {i}")
                 self.curr_keyframe = i
 
-                _, _, _, mask_pose = cv2.recoverPose(E, inliers1, inliers2, self.K)
-                print(f"Number of inliers: {np.sum(mask_pose >= 1)}")
-
-
                 if plotting:
                     print(f"Keyframe distance: {keyframe_distance}")
                     print(f"Average depth: {average_depth}")
                     print("IMPORTANT: Not to real scale but relative scale")
 
                     poses = [np.hstack([self.R_prev, self.t_prev]), np.hstack([R_curr, t_curr])]
+                    coords_prev = self.t_prev.flatten()
+                    coords_curr = t_curr.flatten()
+                    print(f"Previous pose coordinates: {coords_prev}")
+                    print(f"Current pose coordinates: {coords_curr}")
                     plot_3d_scene(points_3d=points_3d,
                         poses=poses,
                         img=img_i,
                         keypoints=None, #kp_i,
-                        matched_points=pts2,
+                        matched_points=pts2, # matched correspondences =/= inliers1!
                         inliers1=inliers1,
                         inliers2=inliers2,
                         title="3D Scene Reconstruction"
@@ -295,7 +306,7 @@ class VisualOdometry:
 
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
-    ds = 2
+    ds = 0
 
     paths = {
         "kitti_path": "./Data/kitti05",
@@ -314,7 +325,6 @@ def main():
 
     # Initialize VO
     vo = VisualOdometry(K)
-
     vo.initialization(data_params, use_lowes=False, plotting=True)
 
 
