@@ -1,16 +1,11 @@
-import sys
-import os
 import time
 from dataclasses import dataclass
 from typing import Any
 import numpy as np
 import cv2
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from pipeline_mathieu import data_loader
-from pipeline_mathieu.plotting import plot_3d_scene
-from pipeline_mathieu.vo_pipeline import (
+from plotting import plot_3d_scene
+from functions import (
     detect_features,
     match_features,
     estimate_pose_from_2d2d,
@@ -18,6 +13,7 @@ from pipeline_mathieu.vo_pipeline import (
     get_keyframe_distance,
     get_average_depth,
 )
+import data_loader
 
 @dataclass
 class FrameData:
