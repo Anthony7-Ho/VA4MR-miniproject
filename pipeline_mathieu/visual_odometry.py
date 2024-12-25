@@ -220,8 +220,8 @@ class VisualOdometry:
             start_time = time.time()
         # Process first frame
         self.current_frame = FrameData(
-            keypoints=None,
-            descriptors=None,
+            keypoints=self.current_keyframe.frame_data.keypoints,
+            descriptors=self.current_keyframe.frame_data.descriptors,
             correspondences=None,
             rotation= self.current_keyframe.frame_data.rotation,
             translation= self.current_keyframe.frame_data.translation,
@@ -234,18 +234,11 @@ class VisualOdometry:
             inliers1=None,
             inliers2=None
         )
-        img0 = data_loader.load_image(data_params, self.current_keyframe.frame_data.frame_idx, grayscale=True)
-        kp0, desc0 = detect_features(img0)
-        self.current_keyframe.frame_data.keypoints = kp0
-        self.current_keyframe.frame_data.descriptors = desc0
 
         # Search for second keyframe
         for i in range(self.current_keyframe.frame_data.frame_idx+1, min(data_params["last_frame"] + 1, self.current_keyframe.frame_data.frame_idx+11)):
-            print(i)
             img_i = data_loader.load_image(data_params, i, grayscale=True)
-
             result = self.select_keyframe(img_i, i, use_lowes)
-
             if result.is_keyframe:
                 if verbose:
                     print(30*"=")
@@ -362,17 +355,12 @@ class VisualOdometry:
             print(f"Current pose coordinates: {t_C_W.flatten()}")
 
             poses = [np.hstack([R_C_W, t_C_W])]
-            scene_plotter.update_plot(self.landmarks, poses, self.K,
+            scene_plotter.update_plot(img_i, kp_i, self.landmarks, pts2, self.current_keyframe.inliers1,self.current_keyframe.inliers2, poses, self.K,
                                     title=f"Frame {i}")
-            plt.pause(0.1)  # Add small pause to allow for visualization
+            #plt.pause(1.0)  # Add small pause to allow for visualization
 
             # # --- Main Loop Keyframe recompute ---
-            if statistics[2] <= 30:
-            #     print("Recomputing keyframe...")
-            #     result = self.select_keyframe(img_i, i, use_lowes=False)
-            #     if result.is_keyframe:
-            #         self.current_keyframe = result
-            #         self.landmarks = result.points_3d
+            if statistics[2] <= 60:
                 self.current_keyframe.frame_data.frame_idx = i
                 self.current_keyframe.frame_data.rotation = R_C_W
                 self.current_keyframe.frame_data.translation = t_C_W
@@ -402,10 +390,10 @@ def main():
     vo = VisualOdometry(K)
     scene_plotter = ScenePlotter()
     scene_plotter.initialize_plot()
-
-    while vo.current_keyframe.frame_data.frame_idx < 200:
-        vo.boot(data_params,use_lowes=False, plotting=False, verbose=False)
+    vo.initialization(data_params,use_lowes=False, plotting=False, verbose=False)
+    while vo.current_keyframe.frame_data.frame_idx < data_params["last_frame"] + 1:
         vo.main_loop(data_params, scene_plotter)
+        vo.boot(data_params,use_lowes=False, plotting=False, verbose=False)
 
 if __name__ == "__main__":
     main()

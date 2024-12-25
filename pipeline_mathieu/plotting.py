@@ -113,6 +113,8 @@ def plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, ax=
     if ax is None:
         fig = plt.figure(figsize=(10, 6))
         ax = fig.gca()
+    if ax is not None:
+        ax.clear()
 
     # Display image
     ax.imshow(img, cmap='gray')
@@ -176,8 +178,17 @@ def _plot_3d_reconstruction(ax, points_3d, poses, title):
 class ScenePlotter:
     def __init__(self):
         plt.ion()
-        self.fig = plt.figure(figsize=(10, 6))
-        self.ax = self.fig.add_subplot(111, projection='3d')
+        self.fig = plt.figure(figsize=(15, 8))
+
+    
+        self.ax = self.fig.add_subplot(121, projection='3d')
+
+        # Create 2D subplot
+        self.ax_2d = self.fig.add_subplot(122)
+
+        # Make right plot larger
+        self.fig.subplots_adjust(right=0.98, left=0.02, wspace=0.1, bottom=0.05, top=0.95)
+
         self.scatter = None
         self.quiver_objects = []
         self.fov_lines = []
@@ -188,9 +199,22 @@ class ScenePlotter:
         self.ax.set_zlabel("Z")
         self.ax.set_box_aspect([1, 1, 1])
         self.ax.view_init(elev=0, azim=270)
+        # Set equal scales
+        self.ax.set_aspect('equal')
+        # Optional: Set same limits for all axes
+        limit = 20  # Adjust value as needed
+#
+        self.ax.set_xlim(-limit, limit)
+        self.ax.set_ylim(-limit, limit)
+        self.ax.set_zlim(-limit, limit)
 
-    def update_plot(self, points_3d, poses, K, title="3D Scene"):
+    def update_plot(self, img, keypoints, points_3d,matched_points, inliers1, inliers2, poses, K, title="3D Scene"):
         # Clear previous camera poses and FOV
+        limit = 20
+        self.ax.set_xlim(poses[0][0, 3]-limit, poses[0][0, 3]+limit)
+        self.ax.set_ylim(poses[0][1, 3]-limit, poses[0][1, 3]+limit)
+        self.ax.set_zlim(poses[0][2, 3]-limit, poses[0][2, 3]+limit)
+
         for quiver in self.quiver_objects:
             quiver.remove()
         self.quiver_objects = []
@@ -219,10 +243,7 @@ class ScenePlotter:
             # Add FOV visualization
             self.fov_lines.extend(self.plot_camera_fov(pose, K, near=0.1, far=1.0))
 
-        # Update title
-        # self.ax.texts.clear()
-        # self.ax.text2D(0.5, 0.85, title, transform=self.ax.transAxes,
-        #               ha='center', fontsize=12)
+        plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, self.ax_2d)
 
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
