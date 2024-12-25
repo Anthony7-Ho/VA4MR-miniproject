@@ -116,7 +116,6 @@ class VisualOdometry:
             inliers1,
             inliers2
         )
-
         # Check keyframe criteria
         keyframe_distance = get_keyframe_distance(t_21)
         average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
@@ -152,6 +151,118 @@ class VisualOdometry:
             )
 
         return KeyframeData(is_keyframe=False)
+
+    def select_keyframe_boot(self,
+                        scene_plotter,
+                       curr_frame: np.ndarray,
+                       frame_idx: int,
+                       use_lowes: bool = False) -> KeyframeData:
+        """Determine if the current frame should be a keyframe
+        Args:
+            curr_frame: Current image frame
+            frame_idx: Current frame index
+            use_lowes: Whether to use Lowe's ratio test
+        Returns:
+            KeyframeData object containing keyframe decision and data
+        """
+        # Detect features in current frame
+        curr_kp, curr_desc = detect_features(curr_frame)
+
+        # Match features between current and previous frame
+        _, desc1, desc2, pts1, pts2 = match_features(
+            self.current_keyframe.frame_data.keypoints,
+            self.current_keyframe.frame_data.descriptors,
+            curr_kp,
+            curr_desc,
+            use_lowes
+        )
+
+        # Estimate relative pose
+        _, R_21, t_21, mask = estimate_pose_from_2d2d(pts1, pts2, self.K)
+        inliers1 = pts1[mask.ravel() == 1]
+        inliers2 = pts2[mask.ravel() == 1]
+        inlier_desc1 = desc1[mask.ravel() == 1]
+        inlier_desc2 = desc2[mask.ravel() == 1]
+
+        # Calculate absolute pose
+        # Convert relative pose from camera 2 to camera 1 perspective
+        R_12 = R_21.T
+        t_12 = -R_21.T @ t_21
+        # Transform to world frame
+        R_curr = self.current_keyframe.frame_data.rotation @ R_12
+        t_curr = (self.current_keyframe.frame_data.translation +
+              self.current_keyframe.frame_data.rotation @ t_12)
+
+        # Triangulate points using relative pose
+        points_3d = triangulate_points(
+            self.K,
+            #self.current_keyframe.frame_data.rotation,
+            #self.current_keyframe.frame_data.translation,
+            np.eye(3),
+            np.zeros((3,1)),
+            R_21,   # Use relative pose for triangulation
+            t_21,
+            inliers1,
+            inliers2
+        )
+        poses = [np.hstack([R_curr, t_curr])]
+
+        # Check keyframe criteria
+        keyframe_distance = get_keyframe_distance(t_21)
+        average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
+        
+        # put 3d points into world frame
+
+        points_3d = (self.current_keyframe.frame_data.rotation @ points_3d.T + 
+             self.current_keyframe.frame_data.translation.reshape(3,1)).T
+        
+        scene_plotter.update_plot_boot(curr_frame, curr_kp, points_3d, pts2, inliers1, inliers2,poses, self.K,
+                                    title=f"Frame {frame_idx}")
+
+        if average_depth == 0:
+            return KeyframeData(is_keyframe=False)
+
+        is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
+        if is_keyframe:
+#
+            frame_data = FrameData(
+                keypoints=curr_kp,
+                descriptors=curr_desc,
+                correspondences=pts2,
+                rotation=R_curr,
+                translation=t_curr,
+                frame_idx=frame_idx
+            )
+
+            return KeyframeData(
+                is_keyframe=True,
+                points_3d=points_3d,
+                frame_data=frame_data,
+                inliers1=inliers1,
+                inlier_desc1=inlier_desc1,
+                inliers2=inliers2,
+                inlier_desc2=inlier_desc2
+            )
+        else:
+#
+            frame_data = FrameData(
+                keypoints=curr_kp,
+                descriptors=curr_desc,
+                correspondences=pts2,
+                rotation=R_curr,
+                translation=t_curr,
+                frame_idx=frame_idx
+            )
+
+            return KeyframeData(
+                is_keyframe=False,
+                points_3d=points_3d,
+                frame_data=frame_data,
+                inliers1=inliers1,
+                inlier_desc1=inlier_desc1,
+                inliers2=inliers2,
+                inlier_desc2=inlier_desc2
+            )
 
     def initialization(self,
                       data_params: dict[str, Any],
@@ -205,6 +316,7 @@ class VisualOdometry:
 
     def boot(self,
                       data_params: dict[str, Any],
+                      scene_plotter,
                       use_lowes: bool = False,
                       plotting: bool = False,
                       verbose: bool = False) -> bool:
@@ -238,7 +350,7 @@ class VisualOdometry:
         # Search for second keyframe
         for i in range(self.current_keyframe.frame_data.frame_idx+1, min(data_params["last_frame"] + 1, self.current_keyframe.frame_data.frame_idx+11)):
             img_i = data_loader.load_image(data_params, i, grayscale=True)
-            result = self.select_keyframe(img_i, i, use_lowes)
+            result = self.select_keyframe_boot(scene_plotter,img_i, i, use_lowes)
             if result.is_keyframe:
                 if verbose:
                     print(30*"=")
@@ -256,6 +368,7 @@ class VisualOdometry:
                 self.current_keyframe = result
                 self.current_keyframe.frame_data = result.frame_data
                 self.landmarks = result.points_3d
+
                 return True
 
         raise ValueError("Failed to find next keyframe during initialization")
@@ -355,8 +468,10 @@ class VisualOdometry:
             print(f"Current pose coordinates: {t_C_W.flatten()}")
 
             poses = [np.hstack([R_C_W, t_C_W])]
-            scene_plotter.update_plot(img_i, kp_i, self.landmarks, pts2, self.current_keyframe.inliers1,self.current_keyframe.inliers2, poses, self.K,
+
+            scene_plotter.update_plot_loop(img_i, kp_i, self.landmarks, pts2, poses, self.K,
                                     title=f"Frame {i}")
+            
             #plt.pause(1.0)  # Add small pause to allow for visualization
 
             # # --- Main Loop Keyframe recompute ---
@@ -393,7 +508,7 @@ def main():
     vo.initialization(data_params,use_lowes=False, plotting=False, verbose=False)
     while vo.current_keyframe.frame_data.frame_idx < data_params["last_frame"] + 1:
         vo.main_loop(data_params, scene_plotter)
-        vo.boot(data_params,use_lowes=False, plotting=False, verbose=False)
+        vo.boot(data_params,scene_plotter, use_lowes=False, plotting=False, verbose=False)
 
 if __name__ == "__main__":
     main()

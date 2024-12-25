@@ -14,7 +14,6 @@ def plot_features(image, keypoints, title="Detected Features"):
     plt.axis("off")
     plt.show()
 
-
 def plot_matches(img1, img2, keypoints1, keypoints2, matches, mask, title="Feature Matches"):
     """Plot matching features between two images"""
     img_matches = cv2.drawMatches(
@@ -33,7 +32,6 @@ def plot_matches(img1, img2, keypoints1, keypoints2, matches, mask, title="Featu
     plt.title(title)
     plt.axis("off")
     plt.show()
-
 
 def plot_optical_flow(img1, img2, pts1, pts2, title="Optical Flow"):
     """Visualize optical flow between two frames"""
@@ -69,7 +67,6 @@ def plot_features_and_matches(img1, img2, pts1, pts2, matched_pts1, matched_pts2
     plt.legend()
     plt.show()
 
-
 def plot_3d_scene(points_3d, poses, img, keypoints, matched_points, inliers1, inliers2,
                   title="3D Scene"):
     """
@@ -98,7 +95,7 @@ def plot_3d_scene(points_3d, poses, img, keypoints, matched_points, inliers1, in
     plt.tight_layout()
     plt.show()
 
-def plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, ax=None):
+def plot_feature_matches_loop(img, keypoints, matched_points, ax=None):
     """
     Visualizes keypoints and feature matches on an image.
     
@@ -122,18 +119,18 @@ def plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, ax=
     # Plot matched points
     if matched_points.size > 0:
         ax.scatter(matched_points[:, 0], matched_points[:, 1],
-                  marker='x', color='red', label=f'Matched Keypoints: {len(matched_points)}')
+                  marker='x', color='red',s=8, label=f'Matched Keypoints (3D-2D): {len(matched_points)}')
 
     # Plot all keypoints
     if keypoints:
         kp_coords = np.array([kp.pt for kp in keypoints])
         ax.scatter(kp_coords[:, 0], kp_coords[:, 1],
-                  marker='o', color='blue', s=8, label='Keypoints')
+                  marker='o', color='blue', s=2, label='Keypoints')
 
     # Draw inlier connections
-    for pt1, pt2 in zip(inliers1, inliers2):
-        ax.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]],
-                'g-', linewidth=2)
+    #for pt1, pt2 in zip(inliers1, inliers2):
+    #    ax.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]],
+    #            'g-', linewidth=1)
 
     # # Add inlier count and matched keypoints count
     # ax.text(0.05, 0.90, f'Matched Keypoints: {len(matched_points)}\nInliers: {len(inliers1)}',
@@ -141,9 +138,57 @@ def plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, ax=
     #         bbox={"facecolor": 'white', "alpha": 0.5})
 
     # Add legend
-    ax.plot([], [], 'g-', linewidth=2, label=f'Inliers: {len(inliers1)}')
-    ax.legend()
-    ax.set_title("Feature Matches")
+    #ax.plot([], [], 'g-', linewidth=2, label=f'Bootstraping Inliers: {len(inliers1)}')
+    ax.legend(loc='upper right', bbox_to_anchor=(1, 1))
+    ax.set_title(" P3P running...")
+    #ax.axis("off")
+
+def plot_feature_matches_boot(img, keypoints, matched_points, inliers1, inliers2, ax=None):
+    """
+    Visualizes keypoints and feature matches on an image.
+    
+    Args:
+        img (np.ndarray): Input image (the second image)
+        keypoints (list): List of cv2.KeyPoint objects
+        matched_points (np.ndarray): Array of matched point coordinates
+        inliers1 (np.ndarray): Inlier points from first image
+        inliers2 (np.ndarray): Inlier points from second image
+        ax (matplotlib.axes.Axes, optional): Axes to plot on
+    """
+    if ax is None:
+        fig = plt.figure(figsize=(10, 6))
+        ax = fig.gca()
+    if ax is not None:
+        ax.clear()
+
+    # Display image
+    ax.imshow(img, cmap='gray')
+
+    # Plot matched points
+    if matched_points.size > 0:
+        ax.scatter(matched_points[:, 0], matched_points[:, 1],
+                  marker='x', color='red',s=8, label=f'Matched Keypoints (2D-2D): {len(matched_points)}')
+
+    # Plot all keypoints
+    if keypoints:
+        kp_coords = np.array([kp.pt for kp in keypoints])
+        ax.scatter(kp_coords[:, 0], kp_coords[:, 1],
+                  marker='o', color='cyan', s=2, label='Keypoints')
+
+    # Draw inlier connections
+    for pt1, pt2 in zip(inliers1, inliers2):
+        ax.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]],
+                'v-', linewidth=1)
+
+    # # Add inlier count and matched keypoints count
+    # ax.text(0.05, 0.90, f'Matched Keypoints: {len(matched_points)}\nInliers: {len(inliers1)}',
+    #         transform=ax.transAxes, fontsize=12,
+    #         bbox={"facecolor": 'white', "alpha": 0.5})
+
+    # Add legend
+    ax.plot([], [], 'v-', linewidth=2, label=f'Inliers: {len(inliers1)}')
+    ax.legend(loc='upper right', bbox_to_anchor=(1, 1))
+    ax.set_title(" 8-point RanSaC running...")
     ax.axis("off")
 
 def _plot_3d_reconstruction(ax, points_3d, poses, title):
@@ -208,12 +253,14 @@ class ScenePlotter:
         self.ax.set_ylim(-limit, limit)
         self.ax.set_zlim(-limit, limit)
 
-    def update_plot(self, img, keypoints, points_3d,matched_points, inliers1, inliers2, poses, K, title="3D Scene"):
+    def update_plot_boot(self, img, keypoints, points_3d,matched_points, inliers1, inliers2, poses, K, title):
         # Clear previous camera poses and FOV
         limit = 20
         self.ax.set_xlim(poses[0][0, 3]-limit, poses[0][0, 3]+limit)
         self.ax.set_ylim(poses[0][1, 3]-limit, poses[0][1, 3]+limit)
         self.ax.set_zlim(poses[0][2, 3]-limit, poses[0][2, 3]+limit)
+
+        self.ax.set_title(title)
 
         for quiver in self.quiver_objects:
             quiver.remove()
@@ -227,7 +274,7 @@ class ScenePlotter:
         if self.scatter is not None:
             self.scatter.remove()
         self.scatter = self.ax.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2],
-                                     c="blue", marker=".", s=5)
+                                     c="cyan", marker=".", s=5, label='Landmarks')
 
         # Plot camera poses
         colors = ["r", "g", "b"]
@@ -237,14 +284,59 @@ class ScenePlotter:
                 direction = pose[:3, i] * 0.5
                 quiver = self.ax.quiver(position[0], position[1], position[2],
                                       direction[0], direction[1], direction[2],
-                                      color=color, length=1)
+                                      color=color, length=1, label=f'Camera e_{i}')
                 self.quiver_objects.append(quiver)
 
             # Add FOV visualization
             self.fov_lines.extend(self.plot_camera_fov(pose, K, near=0.1, far=1.0))
 
-        plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, self.ax_2d)
+        plot_feature_matches_boot(img, keypoints, matched_points,inliers1, inliers2, self.ax_2d)
 
+        self.ax.legend()
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+        # plt.savefig("plot_3d_scene.png")
+        
+    def update_plot_loop(self, img, keypoints, points_3d, matched_points, poses, K, title):
+        # Clear previous camera poses and FOV
+        limit = 20
+        self.ax.set_xlim(poses[0][0, 3]-limit, poses[0][0, 3]+limit)
+        self.ax.set_ylim(poses[0][1, 3]-limit, poses[0][1, 3]+limit)
+        self.ax.set_zlim(poses[0][2, 3]-limit, poses[0][2, 3]+limit)
+
+        self.ax.set_title(title)
+
+        for quiver in self.quiver_objects:
+            quiver.remove()
+        self.quiver_objects = []
+
+        for line in self.fov_lines:
+            line.remove()
+        self.fov_lines = []
+
+        # Update scatter plot
+        if self.scatter is not None:
+            self.scatter.remove()
+        self.scatter = self.ax.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2],
+                                     c="blue", marker=".", s=5, label='Landmarks')
+
+        # Plot camera poses
+        colors = ["r", "g", "b"]
+        for pose in poses:
+            position = pose[:3, 3]
+            for i, color in enumerate(colors):
+                direction = pose[:3, i] * 0.5
+                quiver = self.ax.quiver(position[0], position[1], position[2],
+                                      direction[0], direction[1], direction[2],
+                                      color=color, length=1, label=f'Camera e_{i}')
+                self.quiver_objects.append(quiver)
+
+            # Add FOV visualization
+            self.fov_lines.extend(self.plot_camera_fov(pose, K, near=0.1, far=1.0))
+
+        plot_feature_matches_loop(img, keypoints, matched_points, self.ax_2d)
+
+        self.ax.legend()
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
         # plt.savefig("plot_3d_scene.png")
