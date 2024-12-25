@@ -95,17 +95,6 @@ class VisualOdometry:
         inlier_desc1 = desc1[mask.ravel() == 1]
         inlier_desc2 = desc2[mask.ravel() == 1]
 
-        # Triangulate points using relative pose
-        points_3d = triangulate_points(
-            self.K,
-            self.current_keyframe.frame_data.rotation,
-            self.current_keyframe.frame_data.translation,
-            R_21,   # Use relative pose for triangulation
-            t_21,
-            inliers1,
-            inliers2
-        )
-
         # Calculate absolute pose
         # Convert relative pose from camera 2 to camera 1 perspective
         R_12 = R_21.T
@@ -115,9 +104,27 @@ class VisualOdometry:
         t_curr = (self.current_keyframe.frame_data.translation +
               self.current_keyframe.frame_data.rotation @ t_12)
 
+        # Triangulate points using relative pose
+        points_3d = triangulate_points(
+            self.K,
+            #self.current_keyframe.frame_data.rotation,
+            #self.current_keyframe.frame_data.translation,
+            np.eye(3),
+            np.zeros((3,1)),
+            R_21,   # Use relative pose for triangulation
+            t_21,
+            inliers1,
+            inliers2
+        )
+
         # Check keyframe criteria
         keyframe_distance = get_keyframe_distance(t_21)
-        average_depth = get_average_depth(points_3d, R_curr, t_curr)
+        average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
+        
+        # put 3d points into world frame
+
+        points_3d = (self.current_keyframe.frame_data.rotation @ points_3d.T + 
+             self.current_keyframe.frame_data.translation.reshape(3,1)).T
 
         if average_depth == 0:
             return KeyframeData(is_keyframe=False)
@@ -216,10 +223,8 @@ class VisualOdometry:
             keypoints=None,
             descriptors=None,
             correspondences=None,
-            rotation=np.eye(3),
-            translation=np.zeros((3, 1)),
-            #rotation= self.current_keyframe.frame_data.rotation,
-            #translation= self.current_keyframe.frame_data.translation,
+            rotation= self.current_keyframe.frame_data.rotation,
+            translation= self.current_keyframe.frame_data.translation,
             frame_idx= self.current_keyframe.frame_data.frame_idx
         )
         self.current_keyframe = KeyframeData(
@@ -324,13 +329,10 @@ class VisualOdometry:
             return success, R, t, statistics
         return success, None, None, None
 
-    def main_loop(self, data_params):
+    def main_loop(self, data_params, scene_plotter):
         """Main loop for the VO pipeline"""
 
         starting_frame = self.current_keyframe.frame_data.frame_idx
-
-        scene_plotter = ScenePlotter()
-        scene_plotter.initialize_plot()
 
         for i in range(starting_frame+1, data_params["last_frame"] + 1):
             img_i = data_loader.load_image(data_params, i, grayscale=True)
@@ -358,7 +360,6 @@ class VisualOdometry:
             print(30*"-")
             print(f"Norm of translation vector: {np.linalg.norm(t_C_W)}")
             print(f"Current pose coordinates: {t_C_W.flatten()}")
-
 
             poses = [np.hstack([R_C_W, t_C_W])]
             scene_plotter.update_plot(self.landmarks, poses, self.K,
@@ -399,10 +400,12 @@ def main():
 
     # Initialize VO
     vo = VisualOdometry(K)
-    #vo.initialization(data_params, use_lowes=False, plotting=True, verbose=True)
-    while vo.current_keyframe.frame_data.frame_idx < 100:
-        vo.boot(data_params,use_lowes=False, plotting=True, verbose=True)
-        vo.main_loop(data_params)
+    scene_plotter = ScenePlotter()
+    scene_plotter.initialize_plot()
+
+    while vo.current_keyframe.frame_data.frame_idx < 200:
+        vo.boot(data_params,use_lowes=False, plotting=False, verbose=False)
+        vo.main_loop(data_params, scene_plotter)
 
 if __name__ == "__main__":
     main()
