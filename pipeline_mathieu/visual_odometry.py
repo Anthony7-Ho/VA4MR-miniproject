@@ -196,6 +196,72 @@ class VisualOdometry:
 
         raise ValueError("Failed to find next keyframe during initialization")
 
+    def boot(self,
+                      data_params: dict[str, Any],
+                      use_lowes: bool = False,
+                      plotting: bool = False,
+                      verbose: bool = False) -> bool:
+        """Initialize the VO pipeline using two keyframes
+        Args:
+            data_params: Dictionary containing dataset parameters
+            use_lowes: Whether to use Lowe's ratio test
+            plotting: Whether to plot results
+        Returns:
+            bool: True if initialization successful
+        """
+        if verbose:
+            start_time = time.time()
+        # Process first frame
+        self.current_frame = FrameData(
+            keypoints=None,
+            descriptors=None,
+            correspondences=None,
+            rotation=np.eye(3),
+            translation=np.zeros((3, 1)),
+            #rotation= self.current_keyframe.frame_data.rotation,
+            #translation= self.current_keyframe.frame_data.translation,
+            frame_idx= self.current_keyframe.frame_data.frame_idx
+        )
+        self.current_keyframe = KeyframeData(
+            is_keyframe=True,
+            points_3d=None,
+            frame_data=self.current_frame,
+            inliers1=None,
+            inliers2=None
+        )
+        img0 = data_loader.load_image(data_params, self.current_keyframe.frame_data.frame_idx, grayscale=True)
+        kp0, desc0 = detect_features(img0)
+        self.current_keyframe.frame_data.keypoints = kp0
+        self.current_keyframe.frame_data.descriptors = desc0
+
+        # Search for second keyframe
+        for i in range(self.current_keyframe.frame_data.frame_idx+1, min(data_params["last_frame"] + 1, self.current_keyframe.frame_data.frame_idx+11)):
+            print(i)
+            img_i = data_loader.load_image(data_params, i, grayscale=True)
+
+            result = self.select_keyframe(img_i, i, use_lowes)
+
+            if result.is_keyframe:
+                if verbose:
+                    print(30*"=")
+                    print(f"Previous keyframe: {self.current_keyframe.frame_data.frame_idx}\n"
+                          f"Selected keyframe at frame {i}")
+                    end_time = time.time()
+                    print(f"Initialization took: {end_time - start_time:.3f} seconds")
+
+                if plotting:
+                    self._plot_initialization_results(
+                        img_i, result, self.current_keyframe.frame_data, verbose
+                    )
+
+                # Update state with new keyframe
+                self.current_keyframe = result
+                self.current_keyframe.frame_data = result.frame_data
+                self.landmarks = result.points_3d
+                return True
+
+        raise ValueError("Failed to find next keyframe during initialization")
+
     def _plot_initialization_results(self,
                                    img: np.ndarray,
                                    result: KeyframeData,
@@ -300,17 +366,21 @@ class VisualOdometry:
             plt.pause(0.1)  # Add small pause to allow for visualization
 
             # # --- Main Loop Keyframe recompute ---
-            # if statistics[2] <= 30:
+            if statistics[2] <= 30:
             #     print("Recomputing keyframe...")
             #     result = self.select_keyframe(img_i, i, use_lowes=False)
             #     if result.is_keyframe:
             #         self.current_keyframe = result
             #         self.landmarks = result.points_3d
+                self.current_keyframe.frame_data.frame_idx = i
+                self.current_keyframe.frame_data.rotation = R_C_W
+                self.current_keyframe.frame_data.translation = t_C_W
+                return i , R_C_W, t_C_W
 
 
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
-    ds = 2
+    ds = 0
 
     paths = {
         "kitti_path": "./Data/kitti05",
@@ -329,9 +399,10 @@ def main():
 
     # Initialize VO
     vo = VisualOdometry(K)
-    vo.initialization(data_params, use_lowes=False, plotting=True, verbose=True)
-
-    vo.main_loop(data_params)
+    #vo.initialization(data_params, use_lowes=False, plotting=True, verbose=True)
+    while vo.current_keyframe.frame_data.frame_idx < 100:
+        vo.boot(data_params,use_lowes=False, plotting=True, verbose=True)
+        vo.main_loop(data_params)
 
 if __name__ == "__main__":
     main()
