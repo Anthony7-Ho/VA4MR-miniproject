@@ -234,7 +234,8 @@ class ScenePlotter:
         # Make right plot larger
         self.fig.subplots_adjust(right=0.98, left=0.02, wspace=0.1, bottom=0.05, top=0.95)
 
-        self.scatter = None
+        self.scatter1 = None
+        self.scatter2 = None
         self.quiver_objects = []
         self.fov_lines = []
 
@@ -271,9 +272,9 @@ class ScenePlotter:
         self.fov_lines = []
 
         # Update scatter plot
-        if self.scatter is not None:
-            self.scatter.remove()
-        self.scatter = self.ax.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2],
+        if self.scatter1 is not None:
+            self.scatter1.remove()
+        self.scatter1 = self.ax.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2],
                                      c="cyan", marker=".", s=5, label='Landmarks')
 
         # Plot camera poses
@@ -316,12 +317,22 @@ class ScenePlotter:
         self.fov_lines = []
 
         # Update scatter plot
-        if self.scatter is not None:
-            self.scatter.remove()
-        #self.scatter = self.ax.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2],
+        if self.scatter1 is not None:
+            self.scatter1.remove()
+        if self.scatter2 is not None:
+            self.scatter2.remove()
+
+
+
+        # Only plot points within radius
+        self.scatter1 = self.ax.scatter(points_3d[:, 0], 
+                                    points_3d[:, 1], 
+                                    points_3d[:, 2],
+                                    c="blue", marker=".", s=5, label='Landmarks')
+
+        #self.scatter1 = self.ax.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2],
         #                             c="blue", marker=".", s=5, label='Landmarks')
-        if trajectory is not None:
-            self.scatter = self.ax.scatter(trajectory[:, 0], trajectory[:, 1], trajectory[:, 2], 
+        self.scatter2 = self.ax.scatter(trajectory[-10:, 0], trajectory[-10:, 1], trajectory[-10:, 2], 
                          'g-', linewidth=2, label='Camera Trajectory')
 
         # Plot camera poses

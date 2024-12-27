@@ -62,11 +62,11 @@ class VisualOdometry:
             inliers2=None
         )
         self.landmarks = None
-        self.keyframe_update_ratio = 0.05  # Can be made configurable
+        self.keyframe_update_ratio = 0.1  # Can be made configurable
 
         # Add frame buffer to store previous frames
         self.frame_buffer = []
-        self.max_buffer_size = 15
+        self.max_buffer_size = 20
 
         # Add pose history tracking
         self.pose_history = {
@@ -181,6 +181,10 @@ class VisualOdometry:
 
         points_3d = (self.current_keyframe.frame_data.rotation @ points_3d.T + 
              self.current_keyframe.frame_data.translation.reshape(3,1)).T
+        
+        distances = np.sqrt(np.sum((points_3d - t_curr.T) ** 2, axis=1))
+        radius = 10.0  # Adjust this value based on your scene scale
+        mask = distances < radius
 
         if average_depth == 0:
             return KeyframeData(is_keyframe=False)
@@ -239,8 +243,16 @@ class VisualOdometry:
         inlier_desc1 = desc1[mask.ravel() == 1]
         inlier_desc2 = desc2[mask.ravel() == 1]
 
+        # Get the scale from the previous keyframe's translation
+        prev_scale = np.linalg.norm(self.current_keyframe.frame_data.translation- frame.translation)
+    
+        # Rescale t_21 to maintain consistent scale
+        if prev_scale > 0:
+            t_21 = t_21 * prev_scale
+    
         R_12 = R_21.T
         t_12 = -R_21.T @ t_21
+
 
         # Triangulate points using relative pose
         points_3d = triangulate_points(
@@ -257,15 +269,12 @@ class VisualOdometry:
         keyframe_distance = get_keyframe_distance(t_21)
         average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
         
-        # put 3d points into world frame
+        #put 3d points into world frame
 
-        points_3d = (self.current_keyframe.frame_data.rotation @ points_3d.T + 
-             self.current_keyframe.frame_data.translation.reshape(3,1)).T
+        points_3d = (frame.rotation @ points_3d.T + 
+             frame.translation.reshape(3,1)).T
 
         poses = [np.hstack([self.current_keyframe.frame_data.rotation, self.current_keyframe.frame_data.translation])]
-        
-        #scene_plotter.update_plot_boot(img_i, curr_kp, points_3d, pts2, inliers1, inliers2,poses, self.K,
-        #                            title=f"Frame {frame.frame_idx}")
 
         if average_depth == 0:
             return KeyframeData(is_keyframe=False)
@@ -281,7 +290,16 @@ class VisualOdometry:
                 translation=self.current_keyframe.frame_data.translation,
                 frame_idx=self.current_keyframe.frame_data.frame_idx
             )
-
+            """
+            return KeyframeData(
+                is_keyframe=True,
+                points_3d=points_3d[mask],
+                frame_data=frame_data,
+                inliers1=inliers1[mask],
+                inlier_desc1=inlier_desc1[mask],
+                inliers2=inliers2[mask],
+                inlier_desc2=inlier_desc2[mask]
+            )"""
             return KeyframeData(
                 is_keyframe=True,
                 points_3d=points_3d,
@@ -291,26 +309,7 @@ class VisualOdometry:
                 inliers2=inliers2,
                 inlier_desc2=inlier_desc2
             )
-        else:
-#
-            frame_data = FrameData(
-                keypoints=self.current_keyframe.frame_data.keypoints,
-                descriptors=self.current_keyframe.frame_data.descriptors,
-                correspondences=pts2,
-                rotation=self.current_keyframe.frame_data.rotation,
-                translation=self.current_keyframe.frame_data.translation,
-                frame_idx=self.current_keyframe.frame_data.frame_idx
-            )
-
-            return KeyframeData(
-                is_keyframe=False,
-                points_3d=points_3d,
-                frame_data=frame_data,
-                inliers1=inliers1,
-                inlier_desc1=inlier_desc1,
-                inliers2=inliers2,
-                inlier_desc2=inlier_desc2
-            )
+        return KeyframeData(is_keyframe=False)
 
     def initialization(self,
                       data_params: dict[str, Any],
@@ -415,6 +414,9 @@ class VisualOdometry:
                 # Update state with new keyframe
                 self.current_keyframe = result
                 self.current_keyframe.frame_data = result.frame_data
+                
+                # Create a mask for points within radius (e.g., radius = 5 units)
+
                 self.landmarks = result.points_3d
 
                 return True
@@ -536,7 +538,7 @@ class VisualOdometry:
             #plt.pause(1.0)  # Add small pause to allow for visualization
 
             # # --- Main Loop Keyframe recompute ---
-            if statistics[2] <= 40:
+            if statistics[2] <= 50:
                 self.current_keyframe.frame_data.frame_idx = i
                 self.current_keyframe.frame_data.rotation = R_C_W
                 self.current_keyframe.frame_data.translation = t_C_W
