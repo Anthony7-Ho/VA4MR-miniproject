@@ -64,7 +64,7 @@ class VisualOdometry:
         for i in range(1, data_params["last_frame"] + 1):
             img_i = data_loader.load_image(data_params, i, grayscale=True)
             kp_i, des_i = detect_features(img_i)
-            _, pts1, pts2 = match_features(self.kp_prev, self.desc_prev, kp_i, des_i, use_lowes)
+            _, _, _, pts1, pts2 = match_features(self.kp_prev, self.desc_prev, kp_i, des_i, use_lowes)
 
             # estimte_pose returns relative pose of the second camera wrt the first camera
             E, R_21, t_21, mask = estimate_pose_from_2d2d(pts1, pts2, self.K)

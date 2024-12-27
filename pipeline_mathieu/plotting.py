@@ -90,7 +90,7 @@ def plot_3d_scene(points_3d, poses, img, keypoints, matched_points, inliers1, in
 
     # Create 2D subplot
     ax_2d = fig.add_subplot(122)
-    plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, ax_2d)
+    plot_feature_matches_boot(img, keypoints, matched_points, inliers1, inliers2, ax_2d)
 
     plt.tight_layout()
     plt.show()
@@ -245,7 +245,7 @@ class ScenePlotter:
         self.ax.set_box_aspect([1, 1, 1])
         self.ax.view_init(elev=0, azim=270)
         # Set equal scales
-        self.ax.set_aspect('equal')
+        self.ax.set_aspect('auto')
         # Optional: Set same limits for all axes
         limit = 20  # Adjust value as needed
 #
