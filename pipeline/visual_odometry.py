@@ -62,7 +62,64 @@ class VisualOdometry:
             inliers2=None
         )
         self.landmarks = None
-        self.keyframe_update_ratio = 0.1  # Can be made configurable
+        self.keyframe_update_ratio = 0.05  # Can be made configurable
+
+        # Add frame buffer to store previous frames
+        self.frame_buffer = []
+        self.max_buffer_size = 15
+
+        # Add pose history tracking
+        self.pose_history = {
+            'rotations': [np.eye(3)],  # Initialize with first pose
+            'translations': [np.zeros((3, 1))],
+            'frame_indices': [0]
+        }
+    def update_pose_history(self, R: np.ndarray, t: np.ndarray, frame_idx: int):
+        """Update pose history with new pose
+        Args:
+            R: 3x3 rotation matrix
+            t: 3x1 translation vector
+            frame_idx: Current frame index
+        """
+        self.pose_history['rotations'].append(R)
+        self.pose_history['translations'].append(t)
+        self.pose_history['frame_indices'].append(frame_idx)
+
+    def get_trajectory_points(self):
+        """Get trajectory points for plotting
+        Returns:
+            numpy.ndarray: Nx3 array of trajectory points
+        """
+        points = np.array([t.flatten() for t in self.pose_history['translations']])
+        return points
+
+    def update_frame_buffer(self, frame_data: FrameData):
+        """Update the frame buffer with new frame data"""
+        self.frame_buffer.append(frame_data)
+        if len(self.frame_buffer) > self.max_buffer_size:
+            self.frame_buffer.pop(0)
+
+    def find_best_frame_match(self, current_kp, current_desc):
+        """Find the best matching frame from the buffer based on feature matches"""
+        best_matches_count = 0
+        best_frame = None
+        best_matches = None
+        
+        for frame in self.frame_buffer:
+            # Match features
+            bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
+            matches = bf.match(frame.descriptors, current_desc)
+            matches = sorted(matches, key=lambda x: x.distance)
+            
+            # Count good matches (you can adjust the distance threshold)
+            good_matches = [m for m in matches if m.distance < 50]
+            
+            if len(good_matches) > best_matches_count:
+                best_matches_count = len(good_matches)
+                best_frame = frame
+                best_matches = good_matches
+                
+        return best_frame, best_matches
 
     def select_keyframe(self,
                        curr_frame: np.ndarray,
@@ -154,8 +211,8 @@ class VisualOdometry:
 
     def select_keyframe_boot(self,
                         scene_plotter,
-                       curr_frame: np.ndarray,
-                       frame_idx: int,
+                        img_i: np.ndarray,
+                       frame: KeyframeData,
                        use_lowes: bool = False) -> KeyframeData:
         """Determine if the current frame should be a keyframe
         Args:
@@ -165,51 +222,36 @@ class VisualOdometry:
         Returns:
             KeyframeData object containing keyframe decision and data
         """
-        # Detect features in current frame
-        curr_kp, curr_desc = detect_features(curr_frame)
+        # Detect features in previous frame
+        curr_kp, curr_desc = frame.keypoints, frame.descriptors
 
         # Match features between current and previous frame
         _, desc1, desc2, pts1, pts2 = match_features(
-            self.current_keyframe.frame_data.keypoints,
-            self.current_keyframe.frame_data.descriptors,
             curr_kp,
             curr_desc,
+            self.current_keyframe.frame_data.keypoints,
+            self.current_keyframe.frame_data.descriptors,
             use_lowes
         )
-
-        # Estimate relative pose
         _, R_21, t_21, mask = estimate_pose_from_2d2d(pts1, pts2, self.K)
         inliers1 = pts1[mask.ravel() == 1]
         inliers2 = pts2[mask.ravel() == 1]
         inlier_desc1 = desc1[mask.ravel() == 1]
         inlier_desc2 = desc2[mask.ravel() == 1]
 
-        print(30*"*")
-        print(t_21)
-        print(30*"*")
-
-        # Calculate absolute pose
-        # Convert relative pose from camera 2 to camera 1 perspective
         R_12 = R_21.T
         t_12 = -R_21.T @ t_21
-        # Transform to world frame
-        R_curr = self.current_keyframe.frame_data.rotation @ R_12
-        t_curr = (self.current_keyframe.frame_data.translation +
-              self.current_keyframe.frame_data.rotation @ t_12)
 
         # Triangulate points using relative pose
         points_3d = triangulate_points(
             self.K,
-            #self.current_keyframe.frame_data.rotation,
-            #self.current_keyframe.frame_data.translation,
             np.eye(3),
             np.zeros((3,1)),
             R_21,   # Use relative pose for triangulation
             t_21,
-            inliers1,
+            inliers1, 
             inliers2
         )
-        poses = [np.hstack([R_curr, t_curr])]
 
         # Check keyframe criteria
         keyframe_distance = get_keyframe_distance(t_21)
@@ -219,9 +261,11 @@ class VisualOdometry:
 
         points_3d = (self.current_keyframe.frame_data.rotation @ points_3d.T + 
              self.current_keyframe.frame_data.translation.reshape(3,1)).T
+
+        poses = [np.hstack([self.current_keyframe.frame_data.rotation, self.current_keyframe.frame_data.translation])]
         
-        scene_plotter.update_plot_boot(curr_frame, curr_kp, points_3d, pts2, inliers1, inliers2,poses, self.K,
-                                    title=f"Frame {frame_idx}")
+        #scene_plotter.update_plot_boot(img_i, curr_kp, points_3d, pts2, inliers1, inliers2,poses, self.K,
+        #                            title=f"Frame {frame.frame_idx}")
 
         if average_depth == 0:
             return KeyframeData(is_keyframe=False)
@@ -230,12 +274,12 @@ class VisualOdometry:
         if is_keyframe:
 #
             frame_data = FrameData(
-                keypoints=curr_kp,
-                descriptors=curr_desc,
+                keypoints=self.current_keyframe.frame_data.keypoints,
+                descriptors=self.current_keyframe.frame_data.descriptors,
                 correspondences=pts2,
-                rotation=R_curr,
-                translation=t_curr,
-                frame_idx=frame_idx
+                rotation=self.current_keyframe.frame_data.rotation,
+                translation=self.current_keyframe.frame_data.translation,
+                frame_idx=self.current_keyframe.frame_data.frame_idx
             )
 
             return KeyframeData(
@@ -250,12 +294,12 @@ class VisualOdometry:
         else:
 #
             frame_data = FrameData(
-                keypoints=curr_kp,
-                descriptors=curr_desc,
+                keypoints=self.current_keyframe.frame_data.keypoints,
+                descriptors=self.current_keyframe.frame_data.descriptors,
                 correspondences=pts2,
-                rotation=R_curr,
-                translation=t_curr,
-                frame_idx=frame_idx
+                rotation=self.current_keyframe.frame_data.rotation,
+                translation=self.current_keyframe.frame_data.translation,
+                frame_idx=self.current_keyframe.frame_data.frame_idx
             )
 
             return KeyframeData(
@@ -343,6 +387,7 @@ class VisualOdometry:
             translation= self.current_keyframe.frame_data.translation,
             frame_idx= self.current_keyframe.frame_data.frame_idx
         )
+
         self.current_keyframe = KeyframeData(
             is_keyframe=True,
             points_3d=None,
@@ -350,16 +395,15 @@ class VisualOdometry:
             inliers1=None,
             inliers2=None
         )
-
-        # Search for second keyframe
-        for i in range(self.current_keyframe.frame_data.frame_idx+1, min(data_params["last_frame"] + 1, self.current_keyframe.frame_data.frame_idx+11)):
-            img_i = data_loader.load_image(data_params, i, grayscale=True)
-            result = self.select_keyframe_boot(scene_plotter,img_i, i, use_lowes)
+        
+        for frame in reversed(self.frame_buffer[:-1]):
+            img_i = data_loader.load_image(data_params, frame.frame_idx, grayscale=True)
+            result = self.select_keyframe_boot(scene_plotter,img_i,frame, use_lowes)
             if result.is_keyframe:
                 if verbose:
                     print(30*"=")
                     print(f"Previous keyframe: {self.current_keyframe.frame_data.frame_idx}\n"
-                          f"Selected keyframe at frame {i}")
+                          f"Selected keyframe at frame {frame.frame_idx}")
                     end_time = time.time()
                     print(f"Initialization took: {end_time - start_time:.3f} seconds")
 
@@ -374,8 +418,6 @@ class VisualOdometry:
                 self.landmarks = result.points_3d
 
                 return True
-
-        raise ValueError("Failed to find next keyframe during initialization")
 
     def _plot_initialization_results(self,
                                    img: np.ndarray,
@@ -447,7 +489,7 @@ class VisualOdometry:
         for i in range(starting_frame+1, data_params["last_frame"] + 1):
             img_i = data_loader.load_image(data_params, i, grayscale=True)
             kp_i, desc_i = detect_features(img_i)
-            # kp_keyframe = self.current_keyframe.inliers2
+            kp_keyframe = self.current_keyframe.inliers2
             desc_keyframe = self.current_keyframe.inlier_desc2
 
             bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
@@ -459,6 +501,19 @@ class VisualOdometry:
             # Retrieve camera pose in world frame
             R_C_W = R_W_C.T
             t_C_W = -R_W_C.T @ t_W_C
+
+            # Update frame buffer
+            current_frame = FrameData(
+                    keypoints=kp_i,
+                    descriptors=desc_i,
+                    correspondences=pts2,
+                    rotation=R_C_W,
+                    translation=t_C_W,
+                    frame_idx=i
+                )
+            # Update pose history
+            self.update_pose_history(R_C_W, t_C_W, i)
+            self.update_frame_buffer(current_frame)
 
             print()
             print(f"Frame {i}:")
@@ -473,16 +528,20 @@ class VisualOdometry:
 
             poses = [np.hstack([R_C_W, t_C_W])]
 
+            trajectory_points = self.get_trajectory_points()
             scene_plotter.update_plot_loop(img_i, kp_i, self.landmarks, pts2, poses, self.K,
-                                    title=f"Frame {i}")
+                                        title=f"Frame {i}", trajectory=trajectory_points)
+
             
             #plt.pause(1.0)  # Add small pause to allow for visualization
 
             # # --- Main Loop Keyframe recompute ---
-            if statistics[2] <= 60:
+            if statistics[2] <= 40:
                 self.current_keyframe.frame_data.frame_idx = i
                 self.current_keyframe.frame_data.rotation = R_C_W
                 self.current_keyframe.frame_data.translation = t_C_W
+                self.current_keyframe.frame_data.keypoints = kp_i
+                self.current_keyframe.frame_data.descriptors = desc_i
                 return i , R_C_W, t_C_W
 
 
