@@ -538,7 +538,7 @@ class VisualOdometry:
             #plt.pause(1.0)  # Add small pause to allow for visualization
 
             # # --- Main Loop Keyframe recompute ---
-            if statistics[2] <= 50:
+            if statistics[2] <= 40:
                 self.current_keyframe.frame_data.frame_idx = i
                 self.current_keyframe.frame_data.rotation = R_C_W
                 self.current_keyframe.frame_data.translation = t_C_W
