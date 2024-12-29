@@ -16,6 +16,22 @@ from functions import (
 )
 import data_loader
 
+
+def print_log(i, success, statistics, t_C_W):
+
+    print()
+    print(30*"-")
+    print(f"Frame {i}:")
+    print(f"Success: {success}")
+    print(10*"-")
+    print(f"Points 3D percentage: {statistics[0]:.2f}%")
+    print(f"Inlier percentage: {statistics[1]:.2f}%")
+    print(f"Final percentage: {statistics[2]:.2f}%")
+    print(10*"-")
+    print(f"Norm of translation vector: {np.linalg.norm(t_C_W)}")
+    print(f"Current pose coordinates: {t_C_W.flatten()}")
+
+
 @dataclass
 class FrameData:
     """Data class to store frame-specific information"""
@@ -95,25 +111,25 @@ class VisualOdometry:
         inlier_desc1 = desc1[mask.ravel() == 1]
         inlier_desc2 = desc2[mask.ravel() == 1]
 
-        # Triangulate points using relative pose
+        # Calculate absolute pose
+        # First invert the camera1-to-camera2 transformation
+        R_12 = R_21.T
+        t_12 = -R_21.T @ t_21
+        # Then compose with camera 1's world pose (Transform to world frame)
+        R_curr = self.current_keyframe.frame_data.rotation @ R_12
+        t_curr = (self.current_keyframe.frame_data.translation +
+              self.current_keyframe.frame_data.rotation @ t_12)
+
+        # Triangulate points using absolute camera poses
         points_3d = triangulate_points(
             self.K,
             self.current_keyframe.frame_data.rotation,
             self.current_keyframe.frame_data.translation,
-            R_21,   # Use relative pose for triangulation
-            t_21,
+            R_curr,
+            t_curr,
             inliers1,
             inliers2
         )
-
-        # Calculate absolute pose
-        # Convert relative pose from camera 2 to camera 1 perspective
-        R_12 = R_21.T
-        t_12 = -R_21.T @ t_21
-        # Transform to world frame
-        R_curr = self.current_keyframe.frame_data.rotation @ R_12
-        t_curr = (self.current_keyframe.frame_data.translation +
-              self.current_keyframe.frame_data.rotation @ t_12)
 
         # Check keyframe criteria
         keyframe_distance = get_keyframe_distance(t_21)
@@ -244,7 +260,7 @@ class VisualOdometry:
             matched_pts_current_frame,
             self.K,
             dist_coeffs,
-            flags=cv2.SOLVEPNP_P3P # TODO: Check this
+            # flags=cv2.SOLVEPNP_P3P # TODO: Check this
         )
 
         points_3d_percentage = len(matched_3d_points) /len(points_3d) * 100
@@ -264,12 +280,12 @@ class VisualOdometry:
         starting_frame = self.current_keyframe.frame_data.frame_idx
 
         scene_plotter = ScenePlotter()
-        scene_plotter.initialize_plot()
+        # scene_plotter.fig.show()  # Show the window once at the beginning
+        # scene_plotter.initialize_plot()
 
         for i in range(starting_frame+1, data_params["last_frame"] + 1):
             img_i = data_loader.load_image(data_params, i, grayscale=True)
             kp_i, desc_i = detect_features(img_i)
-            # kp_keyframe = self.current_keyframe.inliers2
             desc_keyframe = self.current_keyframe.inlier_desc2
 
             bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
@@ -278,39 +294,168 @@ class VisualOdometry:
             pts2 = np.float32([kp_i[m.trainIdx].pt for m in matches])
 
             success, R_W_C, t_W_C, statistics = self.run_pnp(matches, pts2)
+
+            if not success:
+                raise ValueError("PnP failed to find camera pose")
+
             # Retrieve camera pose in world frame
             R_C_W = R_W_C.T
             t_C_W = -R_W_C.T @ t_W_C
 
-            print()
-            print(f"Frame {i}:")
-            print(f"Success: {success}")
-            print(30*"-")
-            print(f"Points 3D percentage: {statistics[0]:.2f}%")
-            print(f"Inlier percentage: {statistics[1]:.2f}%")
-            print(f"Final percentage: {statistics[2]:.2f}%")
-            print(30*"-")
-            print(f"Norm of translation vector: {np.linalg.norm(t_C_W)}")
-            print(f"Current pose coordinates: {t_C_W.flatten()}")
-
+            # Print debug log
+            print_log(i, success, statistics, t_C_W)
 
             poses = [np.hstack([R_C_W, t_C_W])]
             scene_plotter.update_plot(self.landmarks, poses, self.K,
                                     title=f"Frame {i}")
-            plt.pause(0.1)  # Add small pause to allow for visualization
+            plt.pause(0.05)  # Add small pause to allow for visualization
 
-            # # --- Main Loop Keyframe recompute ---
-            # if statistics[2] <= 30:
-            #     print("Recomputing keyframe...")
-            #     result = self.select_keyframe(img_i, i, use_lowes=False)
-            #     if result.is_keyframe:
-            #         self.current_keyframe = result
-            #         self.landmarks = result.points_3d
+            # --- Main Loop Keyframe recompute ---
+            if statistics[2] <= 50: #30:
+                print()
+                print(30*"=")
+                print("Recomputing keyframe...")
+
+                # plt.ioff()
+                self.next_keyframe(R_C_W, t_C_W, kp_i, desc_i, i, img_i)
+                # plt.ion()
+
+
+    def next_keyframe(self, R_C_W, t_C_W, kp2, desc2, i, img_i):
+        """This function is called when a new keyframe is necessary.
+        Goal is to triangulate new 3d points and update the current keyframe
+        and point cloud with the new values."""
+
+        # debug print
+
+        print(f"Shape of R_C_W: {R_C_W.shape}")
+        print(f"Shape of t_C_W: {t_C_W.shape}")
+        print(f"Shape of kp2: {len(kp2)}")
+        print(f"Shape of desc2: {desc2.shape}")
+        print(f"Shape of current keyframe keypoints: {len(self.current_keyframe.frame_data.keypoints)}")
+        print(f"Shape of current keyframe descriptors: {self.current_keyframe.frame_data.descriptors.shape}")
+
+        # match features between last keyframe and current frame
+        _, matched_desc1, matched_desc2, pts1, pts2 = match_features(
+            self.current_keyframe.frame_data.keypoints,
+            self.current_keyframe.frame_data.descriptors,
+            kp2,
+            desc2,
+            use_lowes=False
+        )
+
+        # # Estimate relative pose (scale ambiguous for t!)
+        # _, R_21, t_21, mask = estimate_pose_from_2d2d(pts1, pts2, self.K)
+        # use estimate pose to filter correspondences with Ransac and chirality check
+        _, R_21, t_21, mask = estimate_pose_from_2d2d(pts1, pts2, self.K)
+        inliers1 = pts1[mask.ravel() == 1]
+        inliers2 = pts2[mask.ravel() == 1]
+        inlier_desc1 = matched_desc1[mask.ravel() == 1]
+        inlier_desc2 = matched_desc2[mask.ravel() == 1]
+
+        # fix scale:
+        prev_pose = self.current_keyframe.frame_data.translation
+        curr_pose = t_C_W
+        relative_trans_world = curr_pose - prev_pose
+        scale = np.linalg.norm(relative_trans_world)
+        t_21 = t_21 * scale
+
+        # Calculate absolute pose
+        # First invert the camera1-to-camera2 transformation
+        R_12 = R_21.T
+        t_12 = -R_21.T @ t_21
+        # Then compose with camera 1's world pose (Transform to world frame)
+        R_curr = self.current_keyframe.frame_data.rotation @ R_12
+        t_curr = (self.current_keyframe.frame_data.translation +
+              self.current_keyframe.frame_data.rotation @ t_12)
+
+
+        # Triangulate new 3d points using the poses of last keyframe and current frame
+        points_3d = triangulate_points(
+            self.K,
+            self.current_keyframe.frame_data.rotation,
+            self.current_keyframe.frame_data.translation,
+            R_C_W,
+            t_C_W,
+            inliers1, #pts1,
+            inliers2 #pts2
+        )
+
+        # comparison between estimate pose and triangulation
+        print(30*"-")
+        print("R_curr is from cv2.recoverPose transformed int world frame")
+        print(f"R_curr: \n{R_curr}")
+        print(f"R_C_W: \n{R_C_W}")
+        print()
+        print(f"t_curr: \n{t_curr}")
+        print(f"t_C_W: \n{t_C_W}")
+        print(30*"-")
+
+
+        # import matplotlib.pyplot as plt
+        # from mpl_toolkits.mplot3d import Axes3D
+        # from plotting import _plot_3d_reconstruction
+        # # new plot where i plot old landmarks and new 3dpoints
+        # poses = [np.hstack([self.current_keyframe.frame_data.rotation, self.current_keyframe.frame_data.translation]),
+        #          np.hstack([R_C_W, t_C_W]),
+        #          np.hstack([R_curr, t_curr])]
+        
+        # title = "3D Scene Reconstruction"
+
+        # fig = plt.figure(figsize=(15, 8))
+        # # Create 3D subplot
+        # ax_3d = plt.axes(projection="3d")
+        # # ax_3d = fig.add_subplot(121, projection="3d")
+
+        # # Filter points based on distance
+        # initial_point_count = points_3d.shape[0]
+        # points_3d = points_3d[np.linalg.norm(points_3d, axis=1) <= 100]
+        # filtered_point_count = points_3d.shape[0]
+        # print(f"Filtered out {initial_point_count - filtered_point_count} points")
+
+
+        # ax_3d.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2],
+        #           c="red", marker=".", s=5)
+        # _plot_3d_reconstruction(ax_3d, self.landmarks, poses, title)
+        # plt.show()
+
+
+
+        # Update the current keyframe
+        frame_data = FrameData(
+            keypoints=kp2,
+            descriptors=desc2,
+            correspondences=pts2,
+            rotation=R_C_W,
+            translation=t_C_W,
+            frame_idx=i
+        )
+
+        result= KeyframeData(
+            is_keyframe=True,
+            points_3d=points_3d,
+            frame_data=frame_data,
+            inliers1=inliers1,
+            inlier_desc1=inlier_desc1,
+            inliers2=inliers2,
+            inlier_desc2=inlier_desc2
+        )
+
+
+        # # call self._plot_initialization_results
+        # self._plot_initialization_results(
+        #     img_i, result, self.current_keyframe.frame_data, verbose=True
+        # )
+
+        # Update state with new keyframe and landmarks
+        self.current_keyframe = result
+        self.landmarks = points_3d  # replace old landmarks with new ones
 
 
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
-    ds = 2
+    ds = 1
+    # MIT flag für P3P lauft KITTI besser somehow
 
     paths = {
         "kitti_path": "./Data/kitti05",
@@ -331,6 +476,7 @@ def main():
     vo = VisualOdometry(K)
     vo.initialization(data_params, use_lowes=False, plotting=True, verbose=True)
 
+    # return # TODO remove this later (mathieu)
     vo.main_loop(data_params)
 
 if __name__ == "__main__":

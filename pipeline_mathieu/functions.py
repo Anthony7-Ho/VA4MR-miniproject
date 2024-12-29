@@ -1,8 +1,6 @@
 import cv2
 import numpy as np
 
-from plotting import plot_3d_scene
-import data_loader
 
 def detect_features(image: np.ndarray) -> tuple[list[cv2.KeyPoint], np.ndarray]:
     """Extract SIFT features and descriptors from an image.
@@ -31,14 +29,23 @@ def match_features(
     kp2: list[cv2.KeyPoint],
     desc2: np.ndarray,
     use_lowes: bool = False,
-) -> tuple[list[cv2.DMatch], np.ndarray, np.ndarray]:
+) -> tuple[list[cv2.DMatch], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Match features between two images.
+    
     Args:
-        kp1, kp2: Keypoints from the two images
-        des1, des2: Feature descriptors
+        kp1: List of keypoints from the first image
+        desc1: (Nx128) Feature descriptors from the first image
+        kp2: List of keypoints from the second image
+        desc2: (Mx128) Feature descriptors from the second image
         use_lowes: Whether to use Lowe's ratio test
+    
     Returns:
-        List of matches and point correspondences
+        Tuple containing:
+        - good_matches: List of cv2.DMatch objects
+        - desc1: (Kx128) Matched feature descriptors from the first image
+        - desc2: (Kx128) Matched feature descriptors from the second image
+        - pts1: (Kx2) Matched keypoint coordinates from the first image
+        - pts2: (Kx2) Matched keypoint coordinates from the second image
     """
     if use_lowes:
         bf = cv2.BFMatcher(cv2.NORM_L2)
@@ -68,14 +75,28 @@ def match_features(
 
 
 def estimate_pose_from_2d2d(
-    pts1: np.ndarray, pts2: np.ndarray, K: np.ndarray, verbose: bool = False
+    pts1: np.ndarray,
+    pts2: np.ndarray,
+    K: np.ndarray,
+    verbose: bool = False
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Estimate pose from 2D-2D correspondences using the essential matrix.
+    
+    Args:
+        pts1: (Nx2) Array of 2D points from the first image
+        pts2: (Nx2) Array of 2D points from the second image
+        K: (3x3) Camera intrinsic matrix
+        verbose: Whether to print detailed information
+    
     Returns:
-        Tuple of (E, mask_essential, R, t, final_inliers)
+        Tuple containing:
+        - E: (3x3) Essential matrix
+        - R_21: (3x3) Rotation matrix from frame 1 to frame 2
+        - t_21: (3x1) Translation vector from frame 1 to frame 2
+        - final_inlier_mask: (Nx1) Mask of inliers used for pose estimation
     """
     E, mask_essential = cv2.findEssentialMat(
-        pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0
+        pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0 # TODO maybe lower threshold
     )
     # Check if the essential matrix E has rank 2
     rank = np.linalg.matrix_rank(E)
@@ -95,42 +116,59 @@ def estimate_pose_from_2d2d(
     inlier_pts2 = pts2[mask_essential.ravel() == 1]
 
     # Recover pose
-    # Returns R_21, t_21: transformation from frame 2 to frame 1
-    # R_21 rotates points from frame 2 to frame 1
-    # t_21 is the position of camera 1 as seen from camera 2
+    # Returns R_21, t_21: transformation from frame 1 to frame 2
+    # R_21 rotates points from frame 1 to frame 2
+    # t_21 is the position of camera 2 in camera 1 coordinates
     _, R_21, t_21, mask_pose = cv2.recoverPose(E, inlier_pts1, inlier_pts2, K)
 
     # Combine both masks to get final inliers
     final_inlier_mask = mask_essential.copy()
     final_inlier_mask[mask_essential.ravel() == 1] = (mask_pose.ravel() >= 1).reshape(-1, 1)
 
-    return E, R_21, t_21, final_inlier_mask #mask_essential
+    return E, R_21, t_21, final_inlier_mask
 
 def triangulate_points(
     K: np.ndarray,
-    R1: np.ndarray,
-    t1: np.ndarray,  # First camera pose
-    R2: np.ndarray,
-    t2: np.ndarray,  # Second camera pose
+    R1: np.ndarray, # First camera pose
+    t1: np.ndarray,
+    R2: np.ndarray, # Second camera pose
+    t2: np.ndarray,
     pts1: np.ndarray,
     pts2: np.ndarray,
 ) -> np.ndarray:
-    """Triangulate 3D points from two views.
+    """Triangulate 3D points from two views and transform them to world coordinates.
+    
     Args:
-        K: Camera intrinsic matrix
-        pts1, pts2: Corresponding points in the two views
-        R1, t1: Pose of the first camera (world frame)
-        R2, t2: Pose of the second camera (camera 1 frame)
+        K: (3x3) Camera intrinsic matrix
+        R1: (3x3) Rotation matrix of first camera in world frame
+        t1: (3x1) Translation vector of first camera in world frame
+        R2: (3x3) Rotation matrix of second camera in world frame
+        t2: (3x1) Translation vector of second camera in world frame
+        pts1: (Nx2) Corresponding points in first image
+        pts2: (Nx2) Corresponding points in second image
+    
     Returns:
-        3D points array
+        points_3d_world: (Nx3) Triangulated 3D points in world coordinates
     """
-    P1 = K @ np.hstack([R1, t1])
-    P2 = K @ np.hstack([R2, t2])
+    # Calculate relative pose (camera 2 relative to camera 1)
+    R_relative = (R2 @ R1.T).T  # Matches cv2.recoverPose convention
+    t_relative = -R2.T @ (t2 - t1)
 
-    points4D = cv2.triangulatePoints(P1, P2, pts1.T, pts2.T)
-    # Convert from homogeneous to Euclidean coordinates
-    points3D = (points4D[:3, :] / points4D[3:4, :]).T
-    return points3D
+    # setup projection matrices
+    P1 = K @ np.hstack([np.eye(3), np.zeros((3, 1))])   # First camera at origin
+    P2 = K @ np.hstack([R_relative, t_relative])        # Second camera relative to first
+
+    # Triangulate points in camera 1's frame and transform to world frame
+    points_4d = cv2.triangulatePoints(P1, P2, pts1.T, pts2.T)
+    points_3d = points_4d[:3, :] / points_4d[3:4, :]
+    points_3d_world = (R1 @ points_3d + t1.reshape(3, 1)).T
+
+    # alternative
+    # T_w_c1 = np.vstack([np.hstack([R1, t1]), [0, 0, 0, 1]])
+    # points_4d_world = T_w_c1 @ points_4d
+    # points_3d = (points_4d_world[:3, :] / points_4d_world[3:4, :]).T
+
+    return points_3d_world
 
 
 def get_keyframe_distance(t_relative: np.ndarray) -> float:
