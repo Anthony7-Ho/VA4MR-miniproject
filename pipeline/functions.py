@@ -73,7 +73,7 @@ def estimate_pose_from_2d2d(
         Tuple of (E, mask_essential, R, t, final_inliers)
     """
     E, mask_essential = cv2.findEssentialMat(
-        pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=0.5
+        pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0
     )
     # Check if the essential matrix E has rank 2
     rank = np.linalg.matrix_rank(E)
