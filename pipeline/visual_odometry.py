@@ -112,7 +112,7 @@ class VisualOdometry:
             matches = sorted(matches, key=lambda x: x.distance)
             
             # Count good matches (you can adjust the distance threshold)
-            good_matches = [m for m in matches if m.distance < 50]
+            good_matches = [m for m in matches if m.distance < 1]
             
             if len(good_matches) > best_matches_count:
                 best_matches_count = len(good_matches)
@@ -183,13 +183,14 @@ class VisualOdometry:
              self.current_keyframe.frame_data.translation.reshape(3,1)).T
         
         distances = np.sqrt(np.sum((points_3d - t_curr.T) ** 2, axis=1))
-        radius = 10.0  # Adjust this value based on your scene scale
+        radius = 20.0 * keyframe_distance # Adjust this value based on your scene scale
         mask = distances < radius
 
         if average_depth == 0:
             return KeyframeData(is_keyframe=False)
 
         is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
+        is_keyframe = frame_idx == 3
         if is_keyframe:
 
             frame_data = FrameData(
@@ -283,12 +284,12 @@ class VisualOdometry:
         distances = np.sqrt(np.sum((points_3d - current_position) ** 2, axis=1))
 
         # Set radius as a factor of average depth (e.g., 2x the average depth)
-        adaptive_radius = 10.0 * keyframe_distance
+        adaptive_radius = 20.0 * keyframe_distance
         mask = distances < adaptive_radius
 
         
         #is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
-        is_keyframe = self.current_keyframe.frame_data.frame_idx - frame.frame_idx == 9
+        is_keyframe = self.current_keyframe.frame_data.frame_idx - frame.frame_idx == 3
         if is_keyframe:
 #
             frame_data = FrameData(
