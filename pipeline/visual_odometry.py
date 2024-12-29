@@ -99,28 +99,6 @@ class VisualOdometry:
         if len(self.frame_buffer) > self.max_buffer_size:
             self.frame_buffer.pop(0)
 
-    def find_best_frame_match(self, current_kp, current_desc):
-        """Find the best matching frame from the buffer based on feature matches"""
-        best_matches_count = 0
-        best_frame = None
-        best_matches = None
-        
-        for frame in self.frame_buffer:
-            # Match features
-            bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
-            matches = bf.match(frame.descriptors, current_desc)
-            matches = sorted(matches, key=lambda x: x.distance)
-            
-            # Count good matches (you can adjust the distance threshold)
-            good_matches = [m for m in matches if m.distance < 1]
-            
-            if len(good_matches) > best_matches_count:
-                best_matches_count = len(good_matches)
-                best_frame = frame
-                best_matches = good_matches
-                
-        return best_frame, best_matches
-
     def select_keyframe(self,
                        curr_frame: np.ndarray,
                        frame_idx: int,
@@ -190,7 +168,7 @@ class VisualOdometry:
             return KeyframeData(is_keyframe=False)
 
         is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
-        is_keyframe = frame_idx == 3
+        is_keyframe = frame_idx == 4
         if is_keyframe:
 
             frame_data = FrameData(
@@ -289,7 +267,7 @@ class VisualOdometry:
 
         
         #is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
-        is_keyframe = self.current_keyframe.frame_data.frame_idx - frame.frame_idx == 3
+        is_keyframe = self.current_keyframe.frame_data.frame_idx - frame.frame_idx == 4
         if is_keyframe:
 #
             frame_data = FrameData(
@@ -540,7 +518,7 @@ class VisualOdometry:
             #plt.pause(1.0)  # Add small pause to allow for visualization
 
             # # --- Main Loop Keyframe recompute ---
-            if statistics[2] <= 40:
+            if statistics[2] <= 35:
                 self.current_keyframe.frame_data.frame_idx = i
                 self.current_keyframe.frame_data.rotation = R_C_W
                 self.current_keyframe.frame_data.translation = t_C_W
