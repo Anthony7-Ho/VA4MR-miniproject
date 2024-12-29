@@ -245,10 +245,10 @@ class VisualOdometry:
 
         # Get the scale from the previous keyframe's translation
         prev_scale = np.linalg.norm(self.current_keyframe.frame_data.translation- frame.translation)
-    
+        t_21_scale = np.linalg.norm(t_21)
         # Rescale t_21 to maintain consistent scale
         if prev_scale > 0:
-            t_21 = t_21 * prev_scale
+            t_21 = t_21 * prev_scale / t_21_scale
     
         R_12 = R_21.T
         t_12 = -R_21.T @ t_21
@@ -278,8 +278,17 @@ class VisualOdometry:
 
         if average_depth == 0:
             return KeyframeData(is_keyframe=False)
+        # Calculate distances and create mask with adaptive radius
+        current_position = frame.translation.reshape(1, 3)
+        distances = np.sqrt(np.sum((points_3d - current_position) ** 2, axis=1))
 
-        is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
+        # Set radius as a factor of average depth (e.g., 2x the average depth)
+        adaptive_radius = 10.0 * keyframe_distance
+        mask = distances < adaptive_radius
+
+        
+        #is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
+        is_keyframe = self.current_keyframe.frame_data.frame_idx - frame.frame_idx == 9
         if is_keyframe:
 #
             frame_data = FrameData(
@@ -290,25 +299,17 @@ class VisualOdometry:
                 translation=self.current_keyframe.frame_data.translation,
                 frame_idx=self.current_keyframe.frame_data.frame_idx
             )
-            """
             return KeyframeData(
                 is_keyframe=True,
-                points_3d=points_3d[mask],
+                points_3d=points_3d[mask],  # Only keep points within radius
                 frame_data=frame_data,
                 inliers1=inliers1[mask],
                 inlier_desc1=inlier_desc1[mask],
                 inliers2=inliers2[mask],
                 inlier_desc2=inlier_desc2[mask]
-            )"""
-            return KeyframeData(
-                is_keyframe=True,
-                points_3d=points_3d,
-                frame_data=frame_data,
-                inliers1=inliers1,
-                inlier_desc1=inlier_desc1,
-                inliers2=inliers2,
-                inlier_desc2=inlier_desc2
             )
+            
+
         return KeyframeData(is_keyframe=False)
 
     def initialization(self,
