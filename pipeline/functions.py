@@ -11,7 +11,8 @@ def detect_features(image: np.ndarray) -> tuple[list[cv2.KeyPoint], np.ndarray]:
     Returns:
         Tuple containing keypoints and descriptors
     """
-    sift = cv2.SIFT_create()
+    #sift = cv2.SIFT_create()
+    sift = cv2.SIFT_create(nfeatures=2000, nOctaveLayers=8, contrastThreshold=0.02, edgeThreshold=15, sigma=1.6)
     keypoints, descriptors = sift.detectAndCompute(image, None)
     # keypoints: List of cv2.KeyPoint objects
     # cv2.KeyPoint attributes:

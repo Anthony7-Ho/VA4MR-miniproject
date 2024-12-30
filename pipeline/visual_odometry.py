@@ -63,7 +63,6 @@ class VisualOdometry:
         )
         self.landmarks = None
         self.keyframe_update_ratio = 0.1  # Can be made configurable
-
         # Add frame buffer to store previous frames
         self.frame_buffer = []
         self.max_buffer_size = 20
@@ -168,7 +167,7 @@ class VisualOdometry:
             return KeyframeData(is_keyframe=False)
 
         is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
-        is_keyframe = frame_idx == 4
+        is_keyframe = frame_idx == 2
         if is_keyframe:
 
             frame_data = FrameData(
@@ -224,10 +223,24 @@ class VisualOdometry:
 
         # Get the scale from the previous keyframe's translation
         prev_scale = np.linalg.norm(self.current_keyframe.frame_data.translation- frame.translation)
+        # Calculate weighted moving average with exponential decay
+        # Track scaling history
+        if not hasattr(self, 'scale_history'):
+            self.scale_history = []
         t_21_scale = np.linalg.norm(t_21)
-        # Rescale t_21 to maintain consistent scale
-        if prev_scale > 0:
-            t_21 = t_21 * prev_scale / t_21_scale
+        self.scale_history.append(prev_scale)
+
+        kp1_scales = [kp.size for kp in curr_kp]
+        kp2_scales = [kp.size for kp in self.current_keyframe.frame_data.keypoints] 
+        avg_scale_ratio = np.mean(kp1_scales) / np.mean(kp2_scales)
+
+        t_21 = t_21 * avg_scale_ratio / t_21_scale      
+
+
+        #if prev_scale > 0:
+        #    t_21 = t_21 * prev_scale / t_21_scale
+        #if avg_prev_scale_buffer > 0:
+        #    t_21 = t_21 * avg_prev_scale_buffer / t_21_scale
     
         R_12 = R_21.T
         t_12 = -R_21.T @ t_21
@@ -262,12 +275,15 @@ class VisualOdometry:
         distances = np.sqrt(np.sum((points_3d - current_position) ** 2, axis=1))
 
         # Set radius as a factor of average depth (e.g., 2x the average depth)
-        adaptive_radius = 20.0 * keyframe_distance
+        adaptive_radius = 50.0 / keyframe_distance
         mask = distances < adaptive_radius
 
+        print(f'keyframe_distance: {keyframe_distance}')
+        print(f'average_depth: {average_depth}')
+        print(f'fraction: {keyframe_distance / average_depth}')
         
-        #is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
-        is_keyframe = self.current_keyframe.frame_data.frame_idx - frame.frame_idx == 4
+        is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
+        is_keyframe = self.current_keyframe.frame_data.frame_idx - frame.frame_idx == 2
         if is_keyframe:
 #
             frame_data = FrameData(
@@ -518,7 +534,7 @@ class VisualOdometry:
             #plt.pause(1.0)  # Add small pause to allow for visualization
 
             # # --- Main Loop Keyframe recompute ---
-            if statistics[2] <= 35:
+            if statistics[2] <= 45:
                 self.current_keyframe.frame_data.frame_idx = i
                 self.current_keyframe.frame_data.rotation = R_C_W
                 self.current_keyframe.frame_data.translation = t_C_W
@@ -529,7 +545,7 @@ class VisualOdometry:
 
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
-    ds = 0
+    ds = 2
 
     paths = {
         "kitti_path": "./Data/kitti05",

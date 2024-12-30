@@ -248,11 +248,11 @@ class ScenePlotter:
         # Set equal scales
         self.ax.set_aspect('equal')
         # Optional: Set same limits for all axes
-        limit = 20  # Adjust value as needed
-#
-        self.ax.set_xlim(-limit, limit)
-        self.ax.set_ylim(-limit, limit)
-        self.ax.set_zlim(-limit, limit)
+        #limit = 20  # Adjust value as needed
+##
+        #self.ax.set_xlim(-limit, limit)
+        #self.ax.set_ylim(-limit, limit)
+        #self.ax.set_zlim(-limit, limit)
 
     def update_plot_boot(self, img, keypoints, points_3d,matched_points, inliers1, inliers2, poses, K, title):
         # Clear previous camera poses and FOV
@@ -332,7 +332,7 @@ class ScenePlotter:
 
         #self.scatter1 = self.ax.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2],
         #                             c="blue", marker=".", s=5, label='Landmarks')
-        self.scatter2 = self.ax.scatter(trajectory[-10:, 0], trajectory[-10:, 1], trajectory[-10:, 2], 
+        self.scatter2 = self.ax.scatter(trajectory[-20:, 0], trajectory[-20:, 1], trajectory[-20:, 2], 
                          'g-', linewidth=2, label='Camera Trajectory')
 
         # Plot camera poses
@@ -352,7 +352,8 @@ class ScenePlotter:
 
         plot_feature_matches_loop(img, keypoints, matched_points, self.ax_2d)
 
-        self.ax.legend()
+
+        #self.ax.legend()
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
         # plt.savefig("plot_3d_scene.png")
