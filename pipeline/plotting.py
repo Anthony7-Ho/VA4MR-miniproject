@@ -127,20 +127,11 @@ def plot_feature_matches_loop(img, keypoints, matched_points, ax=None):
         ax.scatter(kp_coords[:, 0], kp_coords[:, 1],
                   marker='o', color='blue', s=2, label='Keypoints')
 
-    # Draw inlier connections
-    #for pt1, pt2 in zip(inliers1, inliers2):
-    #    ax.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]],
-    #            'g-', linewidth=1)
-
-    # # Add inlier count and matched keypoints count
-    # ax.text(0.05, 0.90, f'Matched Keypoints: {len(matched_points)}\nInliers: {len(inliers1)}',
-    #         transform=ax.transAxes, fontsize=12,
-    #         bbox={"facecolor": 'white', "alpha": 0.5})
 
     # Add legend
     #ax.plot([], [], 'g-', linewidth=2, label=f'Bootstraping Inliers: {len(inliers1)}')
     ax.legend(loc='upper right', bbox_to_anchor=(1, 1))
-    ax.set_title(" P3P running...")
+    ax.set_title("PnP Matched Keypoints")
     #ax.axis("off")
 
 def plot_feature_matches_boot(img, keypoints, matched_points, inliers1, inliers2, ax=None):
@@ -232,7 +223,7 @@ class ScenePlotter:
         self.ax_2d = self.fig.add_subplot(122)
 
         # Make right plot larger
-        self.fig.subplots_adjust(right=0.98, left=0.02, wspace=0.1, bottom=0.05, top=0.95)
+        #self.fig.subplots_adjust(right=0.98, left=0.02, wspace=0.1, bottom=0.05, top=0.95)
 
         self.scatter1 = None
         self.scatter2 = None
@@ -301,7 +292,7 @@ class ScenePlotter:
         
     def update_plot_loop(self, img, keypoints, points_3d, matched_points, poses, K, title,trajectory=None):
         # Clear previous camera poses and FOV
-        limit = 20
+        limit = 30
         self.ax.set_xlim(poses[0][0, 3]-limit, poses[0][0, 3]+limit)
         self.ax.set_ylim(poses[0][1, 3]-limit, poses[0][1, 3]+limit)
         self.ax.set_zlim(poses[0][2, 3]-limit, poses[0][2, 3]+limit)
@@ -322,18 +313,14 @@ class ScenePlotter:
         if self.scatter2 is not None:
             self.scatter2.remove()
 
-
-
         # Only plot points within radius
         self.scatter1 = self.ax.scatter(points_3d[:, 0], 
                                     points_3d[:, 1], 
                                     points_3d[:, 2],
-                                    c="blue", marker=".", s=5, label='Landmarks')
+                                    c="blue", marker=".", s=5, label='3D Landmarks')
 
-        #self.scatter1 = self.ax.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2],
-        #                             c="blue", marker=".", s=5, label='Landmarks')
         self.scatter2 = self.ax.scatter(trajectory[-20:, 0], trajectory[-20:, 1], trajectory[-20:, 2], 
-                         'g-', linewidth=2, label='Camera Trajectory')
+                         'g-', linewidth=2, label='Last 20 Camera poses')
 
         # Plot camera poses
         colors = ["r", "g", "b"]
@@ -343,17 +330,19 @@ class ScenePlotter:
                 direction = pose[:3, i] * 0.5
                 quiver = self.ax.quiver(position[0], position[1], position[2],
                                       direction[0], direction[1], direction[2],
-                                      color=color, length=1, label=f'Camera e_{i}')
+                                      color=color, length=10,label=f'Camera e_{i}')
+                                      #color=color, length=5, )
                 self.quiver_objects.append(quiver)
 
             # Add FOV visualization
-            self.fov_lines.extend(self.plot_camera_fov(pose, K, near=0.1, far=1.0))
-
+            self.fov_lines.extend(self.plot_camera_fov(pose, K, near=0.1, far=6.0))
 
         plot_feature_matches_loop(img, keypoints, matched_points, self.ax_2d)
 
 
-        #self.ax.legend()
+        self.ax.legend(loc='upper right', bbox_to_anchor=(0.95, 0.95),facecolor='white',  # White background
+              edgecolor='black',  # Black border
+              framealpha=1.0) 
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
         # plt.savefig("plot_3d_scene.png")

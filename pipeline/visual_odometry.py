@@ -45,6 +45,7 @@ class VisualOdometry:
         Args:
             K: 3x3 camera intrinsic matrix
         """
+        # Initialize VO
         self.K = K
         self.current_frame = FrameData(
             keypoints=None,
@@ -69,10 +70,11 @@ class VisualOdometry:
 
         # Add pose history tracking
         self.pose_history = {
-            'rotations': [np.eye(3)],  # Initialize with first pose
+            'rotations': [np.eye(3)], 
             'translations': [np.zeros((3, 1))],
             'frame_indices': [0]
         }
+
     def update_pose_history(self, R: np.ndarray, t: np.ndarray, frame_idx: int):
         """Update pose history with new pose
         Args:
@@ -111,7 +113,7 @@ class VisualOdometry:
             KeyframeData object containing keyframe decision and data
         """
         # Detect features in current frame
-        curr_kp, curr_desc = detect_features(curr_frame)
+        curr_kp, curr_desc = detect_features(curr_frame, np.ones(200))
 
         # Match features between current and previous frame
         _, desc1, desc2, pts1, pts2 = match_features(
@@ -130,9 +132,11 @@ class VisualOdometry:
         inlier_desc2 = desc2[mask.ravel() == 1]
 
         # Calculate absolute pose
+
         # Convert relative pose from camera 2 to camera 1 perspective
         R_12 = R_21.T
         t_12 = -R_21.T @ t_21
+
         # Transform to world frame
         R_curr = self.current_keyframe.frame_data.rotation @ R_12
         t_curr = (self.current_keyframe.frame_data.translation +
@@ -141,32 +145,33 @@ class VisualOdometry:
         # Triangulate points using relative pose
         points_3d = triangulate_points(
             self.K,
-            #self.current_keyframe.frame_data.rotation,
-            #self.current_keyframe.frame_data.translation,
             np.eye(3),
             np.zeros((3,1)),
-            R_21,   # Use relative pose for triangulation
+            R_21,   
             t_21,
             inliers1,
             inliers2
         )
+
         # Check keyframe criteria
         keyframe_distance = get_keyframe_distance(t_21)
         average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
         
-        # put 3d points into world frame
-
+        # Put 3d points into world frame
         points_3d = (self.current_keyframe.frame_data.rotation @ points_3d.T + 
              self.current_keyframe.frame_data.translation.reshape(3,1)).T
         
+        # Filter 3d points that are to far away
         distances = np.sqrt(np.sum((points_3d - t_curr.T) ** 2, axis=1))
-        radius = 20.0 * keyframe_distance # Adjust this value based on your scene scale
+        radius = 20.0 * keyframe_distance 
         mask = distances < radius
 
         if average_depth == 0:
             return KeyframeData(is_keyframe=False)
 
-        is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
+        #is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
+
+        # Fixed Keyframe distance
         is_keyframe = frame_idx == 2
         if is_keyframe:
 
@@ -191,7 +196,7 @@ class VisualOdometry:
 
         return KeyframeData(is_keyframe=False)
 
-    def select_keyframe_boot(self,
+    def select_keyframe_reboot(self,
                         scene_plotter,
                         img_i: np.ndarray,
                        frame: KeyframeData,
@@ -215,36 +220,16 @@ class VisualOdometry:
             self.current_keyframe.frame_data.descriptors,
             use_lowes
         )
+
+        # Estimate relative pose
         _, R_21, t_21, mask = estimate_pose_from_2d2d(pts1, pts2, self.K)
         inliers1 = pts1[mask.ravel() == 1]
         inliers2 = pts2[mask.ravel() == 1]
         inlier_desc1 = desc1[mask.ravel() == 1]
         inlier_desc2 = desc2[mask.ravel() == 1]
 
-        # Get the scale from the previous keyframe's translation
+        # Get the scale from the same relative translation calulated using PnP using buffer
         prev_scale = np.linalg.norm(self.current_keyframe.frame_data.translation- frame.translation)
-        # Calculate weighted moving average with exponential decay
-        # Track scaling history
-        if not hasattr(self, 'scale_history'):
-            self.scale_history = []
-        t_21_scale = np.linalg.norm(t_21)
-        self.scale_history.append(prev_scale)
-
-        kp1_scales = [kp.size for kp in curr_kp]
-        kp2_scales = [kp.size for kp in self.current_keyframe.frame_data.keypoints] 
-        avg_scale_ratio = np.mean(kp1_scales) / np.mean(kp2_scales)
-
-        t_21 = t_21 * avg_scale_ratio / t_21_scale      
-
-
-        #if prev_scale > 0:
-        #    t_21 = t_21 * prev_scale / t_21_scale
-        #if avg_prev_scale_buffer > 0:
-        #    t_21 = t_21 * avg_prev_scale_buffer / t_21_scale
-    
-        R_12 = R_21.T
-        t_12 = -R_21.T @ t_21
-
 
         # Triangulate points using relative pose
         points_3d = triangulate_points(
@@ -260,32 +245,34 @@ class VisualOdometry:
         # Check keyframe criteria
         keyframe_distance = get_keyframe_distance(t_21)
         average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
-        
-        #put 3d points into world frame
 
-        points_3d = (frame.rotation @ points_3d.T + 
+        # dampened rescaling using prev_scale
+        scale = 1 + 0.9 * (prev_scale-1)
+        print(scale)
+        points_3d = (scale * frame.rotation @ points_3d.T + 
              frame.translation.reshape(3,1)).T
-
-        poses = [np.hstack([self.current_keyframe.frame_data.rotation, self.current_keyframe.frame_data.translation])]
 
         if average_depth == 0:
             return KeyframeData(is_keyframe=False)
+        
         # Calculate distances and create mask with adaptive radius
         current_position = frame.translation.reshape(1, 3)
         distances = np.sqrt(np.sum((points_3d - current_position) ** 2, axis=1))
 
         # Set radius as a factor of average depth (e.g., 2x the average depth)
-        adaptive_radius = 50.0 / keyframe_distance
+        adaptive_radius = 50.0 #/ keyframe_distance
         mask = distances < adaptive_radius
 
         print(f'keyframe_distance: {keyframe_distance}')
         print(f'average_depth: {average_depth}')
         print(f'fraction: {keyframe_distance / average_depth}')
         
-        is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
+        #is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
+
         is_keyframe = self.current_keyframe.frame_data.frame_idx - frame.frame_idx == 2
+        
+
         if is_keyframe:
-#
             frame_data = FrameData(
                 keypoints=self.current_keyframe.frame_data.keypoints,
                 descriptors=self.current_keyframe.frame_data.descriptors,
@@ -324,7 +311,7 @@ class VisualOdometry:
             start_time = time.time()
         # Process first frame
         img0 = data_loader.load_image(data_params, 0, grayscale=True)
-        kp0, desc0 = detect_features(img0)
+        kp0, desc0 = detect_features(img0, np.ones(200))
         self.current_frame.keypoints = kp0
         self.current_frame.descriptors = desc0
         self.current_keyframe.frame_data.keypoints = kp0
@@ -357,7 +344,7 @@ class VisualOdometry:
 
         raise ValueError("Failed to find next keyframe during initialization")
 
-    def boot(self,
+    def reboot(self,
                       data_params: dict[str, Any],
                       scene_plotter,
                       use_lowes: bool = False,
@@ -390,10 +377,11 @@ class VisualOdometry:
             inliers1=None,
             inliers2=None
         )
-        
+
         for frame in reversed(self.frame_buffer[:-1]):
+
             img_i = data_loader.load_image(data_params, frame.frame_idx, grayscale=True)
-            result = self.select_keyframe_boot(scene_plotter,img_i,frame, use_lowes)
+            result = self.select_keyframe_reboot(scene_plotter,img_i,frame, use_lowes)
             if result.is_keyframe:
                 if verbose:
                     print(30*"=")
@@ -406,13 +394,9 @@ class VisualOdometry:
                     self._plot_initialization_results(
                         img_i, result, self.current_keyframe.frame_data, verbose
                     )
-
                 # Update state with new keyframe
                 self.current_keyframe = result
                 self.current_keyframe.frame_data = result.frame_data
-                
-                # Create a mask for points within radius (e.g., radius = 5 units)
-
                 self.landmarks = result.points_3d
 
                 return True
@@ -486,7 +470,7 @@ class VisualOdometry:
 
         for i in range(starting_frame+1, data_params["last_frame"] + 1):
             img_i = data_loader.load_image(data_params, i, grayscale=True)
-            kp_i, desc_i = detect_features(img_i)
+            kp_i, desc_i = detect_features(img_i, self.current_keyframe.inliers1)
             kp_keyframe = self.current_keyframe.inliers2
             desc_keyframe = self.current_keyframe.inlier_desc2
 
@@ -496,6 +480,7 @@ class VisualOdometry:
             pts2 = np.float32([kp_i[m.trainIdx].pt for m in matches])
 
             success, R_W_C, t_W_C, statistics = self.run_pnp(matches, pts2)
+
             # Retrieve camera pose in world frame
             R_C_W = R_W_C.T
             t_C_W = -R_W_C.T @ t_W_C
@@ -513,16 +498,17 @@ class VisualOdometry:
             self.update_pose_history(R_C_W, t_C_W, i)
             self.update_frame_buffer(current_frame)
 
-            print()
-            print(f"Frame {i}:")
-            print(f"Success: {success}")
-            print(30*"-")
-            print(f"Points 3D percentage: {statistics[0]:.2f}%")
-            print(f"Inlier percentage: {statistics[1]:.2f}%")
-            print(f"Final percentage: {statistics[2]:.2f}%")
-            print(30*"-")
-            print(f"Norm of translation vector: {np.linalg.norm(t_C_W)}")
-            print(f"Current pose coordinates: {t_C_W.flatten()}")
+            # debugging
+            # print()
+            # print(f"Frame {i}:")
+            # print(f"Success: {success}")
+            # print(30*"-")
+            # print(f"Points 3D percentage: {statistics[0]:.2f}%")
+            # print(f"Inlier percentage: {statistics[1]:.2f}%")
+            # print(f"Final percentage: {statistics[2]:.2f}%")
+            # print(30*"-")
+            # print(f"Norm of translation vector: {np.linalg.norm(t_C_W)}")
+            # print(f"Current pose coordinates: {t_C_W.flatten()}")
 
             poses = [np.hstack([R_C_W, t_C_W])]
 
@@ -545,7 +531,7 @@ class VisualOdometry:
 
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
-    ds = 2
+    ds = 1
 
     paths = {
         "kitti_path": "./Data/kitti05",
@@ -567,9 +553,11 @@ def main():
     scene_plotter = ScenePlotter()
     scene_plotter.initialize_plot()
     vo.initialization(data_params,use_lowes=False, plotting=False, verbose=False)
+    # Main Loop 
+
     while vo.current_keyframe.frame_data.frame_idx < data_params["last_frame"] + 1:
         vo.main_loop(data_params, scene_plotter)
-        vo.boot(data_params,scene_plotter, use_lowes=False, plotting=False, verbose=False)
+        vo.reboot(data_params,scene_plotter, use_lowes=False, plotting=False, verbose=False)
 
 if __name__ == "__main__":
     main()

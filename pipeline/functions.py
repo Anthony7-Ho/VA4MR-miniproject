@@ -1,18 +1,27 @@
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
 
 from plotting import plot_3d_scene
 import data_loader
 
-def detect_features(image: np.ndarray) -> tuple[list[cv2.KeyPoint], np.ndarray]:
+def detect_features(image: np.ndarray, current_matches:np.ndarray ) -> tuple[list[cv2.KeyPoint], np.ndarray]:
     """Extract SIFT features and descriptors from an image.
     Args:
         image: Input image
     Returns:
         Tuple containing keypoints and descriptors
     """
-    #sift = cv2.SIFT_create()
-    sift = cv2.SIFT_create(nfeatures=2000, nOctaveLayers=8, contrastThreshold=0.02, edgeThreshold=15, sigma=1.6)
+    sift = cv2.SIFT_create()
+    if current_matches is not None:
+
+        upper_bound = min(6000, 300/len(current_matches)*2000)
+        nfeatures_des = max(2000, int(upper_bound))
+        print(len(current_matches))
+        print(nfeatures_des)
+    else: nfeatures_des = 2000
+    
+    sift = cv2.SIFT_create(nfeatures=nfeatures_des , nOctaveLayers=8, contrastThreshold=0.02, edgeThreshold=15, sigma=1.6)
     keypoints, descriptors = sift.detectAndCompute(image, None)
     # keypoints: List of cv2.KeyPoint objects
     # cv2.KeyPoint attributes:
