@@ -14,12 +14,11 @@ def detect_features(image: np.ndarray, current_matches:np.ndarray ) -> tuple[lis
     """
     sift = cv2.SIFT_create()
     if current_matches is not None:
-
         upper_bound = min(6000, 300/len(current_matches)*2000)
-        nfeatures_des = max(2000, int(upper_bound))
-        print(len(current_matches))
-        print(nfeatures_des)
-    else: nfeatures_des = 2000
+        nfeatures_des = max(3000, int(upper_bound))
+        # print(len(current_matches))
+        # print(nfeatures_des)
+    else: nfeatures_des = 3000
     
     sift = cv2.SIFT_create(nfeatures=nfeatures_des , nOctaveLayers=8, contrastThreshold=0.02, edgeThreshold=15, sigma=1.6)
     keypoints, descriptors = sift.detectAndCompute(image, None)

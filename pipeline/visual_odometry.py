@@ -45,7 +45,6 @@ class VisualOdometry:
         Args:
             K: 3x3 camera intrinsic matrix
         """
-        # Initialize VO
         self.K = K
         self.current_frame = FrameData(
             keypoints=None,
@@ -63,10 +62,12 @@ class VisualOdometry:
             inliers2=None
         )
         self.landmarks = None
-        self.keyframe_update_ratio = 0.1  # Can be made configurable
+        self.keyframe_update_ratio = 0.1 
+        self.keyframe_update_index = 2
+
         # Add frame buffer to store previous frames
         self.frame_buffer = []
-        self.max_buffer_size = 20
+        self.max_buffer_size = 3
 
         # Add pose history tracking
         self.pose_history = {
@@ -100,6 +101,58 @@ class VisualOdometry:
         if len(self.frame_buffer) > self.max_buffer_size:
             self.frame_buffer.pop(0)
 
+    def initialization(self,
+                      data_params: dict[str, Any],
+                      use_lowes: bool = False,
+                      plotting: bool = False,
+                      verbose: bool = False) -> bool:
+        """Initialize the VO pipeline using two keyframes
+        Args:
+            data_params: Dictionary containing dataset parameters
+            use_lowes: Whether to use Lowe's ratio test
+            plotting: Whether to plot results
+        Returns:
+            bool: True if initialization successful
+        """
+        
+        if verbose:
+            start_time = time.time()
+
+        # Process first frame
+        img0 = data_loader.load_image(data_params, 0, grayscale=True)
+        kp0, desc0 = detect_features(img0, np.ones(200))
+        self.current_frame.keypoints = kp0
+        self.current_frame.descriptors = desc0
+        self.current_keyframe.frame_data.keypoints = kp0
+        self.current_keyframe.frame_data.descriptors = desc0
+
+        # Search for second keyframe
+        for i in range(1, min(data_params["last_frame"] + 1, 5)):
+            img_i = data_loader.load_image(data_params, i, grayscale=True)
+
+            result = self.select_keyframe(img_i, i, use_lowes)
+
+            if result.is_keyframe:
+                if verbose:
+                    print(30*"=")
+                    print(f"Previous keyframe: {self.current_keyframe.frame_data.frame_idx}\n"
+                          f"Selected keyframe at frame {i}")
+                    end_time = time.time()
+                    print(f"Initialization took: {end_time - start_time:.3f} seconds")
+
+                if plotting:
+                    self._plot_initialization_results(
+                        img_i, result, self.current_keyframe.frame_data, verbose
+                    )
+
+                # Update state with new keyframe
+                self.current_keyframe = result
+                self.current_keyframe.frame_data = result.frame_data
+                self.landmarks = result.points_3d
+                return True
+
+        raise ValueError("Failed to find next keyframe during initialization")
+
     def select_keyframe(self,
                        curr_frame: np.ndarray,
                        frame_idx: int,
@@ -112,6 +165,7 @@ class VisualOdometry:
         Returns:
             KeyframeData object containing keyframe decision and data
         """
+        
         # Detect features in current frame
         curr_kp, curr_desc = detect_features(curr_frame, np.ones(200))
 
@@ -154,8 +208,8 @@ class VisualOdometry:
         )
 
         # Check keyframe criteria
-        keyframe_distance = get_keyframe_distance(t_21)
-        average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
+        # keyframe_distance = get_keyframe_distance(t_21)
+        # average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
         
         # Put 3d points into world frame
         points_3d = (self.current_keyframe.frame_data.rotation @ points_3d.T + 
@@ -163,16 +217,16 @@ class VisualOdometry:
         
         # Filter 3d points that are to far away
         distances = np.sqrt(np.sum((points_3d - t_curr.T) ** 2, axis=1))
-        radius = 20.0 * keyframe_distance 
+        radius = 50.0 
         mask = distances < radius
 
-        if average_depth == 0:
-            return KeyframeData(is_keyframe=False)
+        # if average_depth == 0:
+        #     return KeyframeData(is_keyframe=False)
 
-        #is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
+        # is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
 
-        # Fixed Keyframe distance
-        is_keyframe = frame_idx == 2
+        # "Fixed" Keyframe distance
+        is_keyframe = frame_idx == self.keyframe_update_index
         if is_keyframe:
 
             frame_data = FrameData(
@@ -209,10 +263,11 @@ class VisualOdometry:
         Returns:
             KeyframeData object containing keyframe decision and data
         """
-        # Detect features in previous frame
+        
+        # Detect features in current frame
         curr_kp, curr_desc = frame.keypoints, frame.descriptors
 
-        # Match features between current and previous frame
+        # Match features between current and last frame (current_keyframe)
         _, desc1, desc2, pts1, pts2 = match_features(
             curr_kp,
             curr_desc,
@@ -228,48 +283,42 @@ class VisualOdometry:
         inlier_desc1 = desc1[mask.ravel() == 1]
         inlier_desc2 = desc2[mask.ravel() == 1]
 
-        # Get the scale from the same relative translation calulated using PnP using buffer
-        prev_scale = np.linalg.norm(self.current_keyframe.frame_data.translation- frame.translation)
-
         # Triangulate points using relative pose
         points_3d = triangulate_points(
             self.K,
             np.eye(3),
             np.zeros((3,1)),
-            R_21,   # Use relative pose for triangulation
+            R_21,  
             t_21,
             inliers1, 
             inliers2
         )
 
         # Check keyframe criteria
-        keyframe_distance = get_keyframe_distance(t_21)
-        average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
+        # keyframe_distance = get_keyframe_distance(t_21)
+        # average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
 
-        # dampened rescaling using prev_scale
-        scale = 1 + 0.9 * (prev_scale-1)
-        print(scale)
+        # Dampened rescaling using the scale from the same relative translation calulated using PnP 
+        prev_scale = np.linalg.norm(self.current_keyframe.frame_data.translation- frame.translation)
+
+        scale = 1 + 0.99 * (prev_scale-1)
         points_3d = (scale * frame.rotation @ points_3d.T + 
              frame.translation.reshape(3,1)).T
 
-        if average_depth == 0:
-            return KeyframeData(is_keyframe=False)
+        # if average_depth == 0:
+        #     return KeyframeData(is_keyframe=False)
         
-        # Calculate distances and create mask with adaptive radius
+        # Calculate distances and create mask with distance filter
         current_position = frame.translation.reshape(1, 3)
         distances = np.sqrt(np.sum((points_3d - current_position) ** 2, axis=1))
-
-        # Set radius as a factor of average depth (e.g., 2x the average depth)
-        adaptive_radius = 50.0 #/ keyframe_distance
+        adaptive_radius = 50.0 
         mask = distances < adaptive_radius
-
-        print(f'keyframe_distance: {keyframe_distance}')
-        print(f'average_depth: {average_depth}')
-        print(f'fraction: {keyframe_distance / average_depth}')
         
-        #is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
-
-        is_keyframe = self.current_keyframe.frame_data.frame_idx - frame.frame_idx == 2
+        # print(f'keyframe_distance: {keyframe_distance}')
+        # print(f'average_depth: {average_depth}')
+        # print(f'fraction: {keyframe_distance / average_depth}')
+        
+        is_keyframe = self.current_keyframe.frame_data.frame_idx - frame.frame_idx == self.keyframe_update_index
         
 
         if is_keyframe:
@@ -281,9 +330,10 @@ class VisualOdometry:
                 translation=self.current_keyframe.frame_data.translation,
                 frame_idx=self.current_keyframe.frame_data.frame_idx
             )
+
             return KeyframeData(
                 is_keyframe=True,
-                points_3d=points_3d[mask],  # Only keep points within radius
+                points_3d=points_3d[mask], 
                 frame_data=frame_data,
                 inliers1=inliers1[mask],
                 inlier_desc1=inlier_desc1[mask],
@@ -293,56 +343,6 @@ class VisualOdometry:
             
 
         return KeyframeData(is_keyframe=False)
-
-    def initialization(self,
-                      data_params: dict[str, Any],
-                      use_lowes: bool = False,
-                      plotting: bool = False,
-                      verbose: bool = False) -> bool:
-        """Initialize the VO pipeline using two keyframes
-        Args:
-            data_params: Dictionary containing dataset parameters
-            use_lowes: Whether to use Lowe's ratio test
-            plotting: Whether to plot results
-        Returns:
-            bool: True if initialization successful
-        """
-        if verbose:
-            start_time = time.time()
-        # Process first frame
-        img0 = data_loader.load_image(data_params, 0, grayscale=True)
-        kp0, desc0 = detect_features(img0, np.ones(200))
-        self.current_frame.keypoints = kp0
-        self.current_frame.descriptors = desc0
-        self.current_keyframe.frame_data.keypoints = kp0
-        self.current_keyframe.frame_data.descriptors = desc0
-
-        # Search for second keyframe
-        for i in range(1, min(data_params["last_frame"] + 1, 11)):
-            img_i = data_loader.load_image(data_params, i, grayscale=True)
-
-            result = self.select_keyframe(img_i, i, use_lowes)
-
-            if result.is_keyframe:
-                if verbose:
-                    print(30*"=")
-                    print(f"Previous keyframe: {self.current_keyframe.frame_data.frame_idx}\n"
-                          f"Selected keyframe at frame {i}")
-                    end_time = time.time()
-                    print(f"Initialization took: {end_time - start_time:.3f} seconds")
-
-                if plotting:
-                    self._plot_initialization_results(
-                        img_i, result, self.current_keyframe.frame_data, verbose
-                    )
-
-                # Update state with new keyframe
-                self.current_keyframe = result
-                self.current_keyframe.frame_data = result.frame_data
-                self.landmarks = result.points_3d
-                return True
-
-        raise ValueError("Failed to find next keyframe during initialization")
 
     def reboot(self,
                       data_params: dict[str, Any],
@@ -358,9 +358,13 @@ class VisualOdometry:
         Returns:
             bool: True if initialization successful
         """
+        
+        if self.current_keyframe.frame_data.frame_idx >= data_params["last_frame"]:
+            return
+        
         if verbose:
             start_time = time.time()
-        # Process first frame
+
         self.current_frame = FrameData(
             keypoints=self.current_keyframe.frame_data.keypoints,
             descriptors=self.current_keyframe.frame_data.descriptors,
@@ -468,7 +472,7 @@ class VisualOdometry:
 
         starting_frame = self.current_keyframe.frame_data.frame_idx
 
-        for i in range(starting_frame+1, data_params["last_frame"] + 1):
+        for i in range(starting_frame+1, data_params["last_frame"]):
             img_i = data_loader.load_image(data_params, i, grayscale=True)
             kp_i, desc_i = detect_features(img_i, self.current_keyframe.inliers1)
             kp_keyframe = self.current_keyframe.inliers2
@@ -497,29 +501,15 @@ class VisualOdometry:
             # Update pose history
             self.update_pose_history(R_C_W, t_C_W, i)
             self.update_frame_buffer(current_frame)
-
-            # debugging
-            # print()
-            # print(f"Frame {i}:")
-            # print(f"Success: {success}")
-            # print(30*"-")
-            # print(f"Points 3D percentage: {statistics[0]:.2f}%")
-            # print(f"Inlier percentage: {statistics[1]:.2f}%")
-            # print(f"Final percentage: {statistics[2]:.2f}%")
-            # print(30*"-")
-            # print(f"Norm of translation vector: {np.linalg.norm(t_C_W)}")
-            # print(f"Current pose coordinates: {t_C_W.flatten()}")
-
             poses = [np.hstack([R_C_W, t_C_W])]
 
             trajectory_points = self.get_trajectory_points()
-            scene_plotter.update_plot_loop(img_i, kp_i, self.landmarks, pts2, poses, self.K,
+
+            scene_plotter.update_plot(img_i, kp_i, self.landmarks, pts2, poses, self.K,
                                         title=f"Frame {i}", trajectory=trajectory_points)
 
-            
-            #plt.pause(1.0)  # Add small pause to allow for visualization
+            # --- Main Loop Keyframe recompute ---
 
-            # # --- Main Loop Keyframe recompute ---
             if statistics[2] <= 45:
                 self.current_keyframe.frame_data.frame_idx = i
                 self.current_keyframe.frame_data.rotation = R_C_W
@@ -531,7 +521,8 @@ class VisualOdometry:
 
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
-    ds = 1
+
+    ds = 2
 
     paths = {
         "kitti_path": "./Data/kitti05",
@@ -550,14 +541,19 @@ def main():
 
     # Initialize VO
     vo = VisualOdometry(K)
+    vo.initialization(data_params,use_lowes=False, plotting=False, verbose=False)
+
+    # Initialize plotter
     scene_plotter = ScenePlotter()
     scene_plotter.initialize_plot()
-    vo.initialization(data_params,use_lowes=False, plotting=False, verbose=False)
-    # Main Loop 
+    
 
-    while vo.current_keyframe.frame_data.frame_idx < data_params["last_frame"] + 1:
+    # Main Loop 
+    while vo.current_keyframe.frame_data.frame_idx < data_params["last_frame"]:
         vo.main_loop(data_params, scene_plotter)
         vo.reboot(data_params,scene_plotter, use_lowes=False, plotting=False, verbose=False)
+    
+    
 
 if __name__ == "__main__":
     main()
