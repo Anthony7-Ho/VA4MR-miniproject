@@ -382,28 +382,51 @@ class VisualOdometry:
             inliers2=None
         )
 
-        for frame in reversed(self.frame_buffer[:-1]):
+        #for frame in reversed(self.frame_buffer[:-1]):
 
-            img_i = data_loader.load_image(data_params, frame.frame_idx, grayscale=True)
-            result = self.select_keyframe_reboot(scene_plotter,img_i,frame, use_lowes)
-            if result.is_keyframe:
-                if verbose:
-                    print(30*"=")
-                    print(f"Previous keyframe: {self.current_keyframe.frame_data.frame_idx}\n"
-                          f"Selected keyframe at frame {frame.frame_idx}")
-                    end_time = time.time()
-                    print(f"Initialization took: {end_time - start_time:.3f} seconds")
+        #    img_i = data_loader.load_image(data_params, frame.frame_idx, grayscale=True)
+        #    result = self.select_keyframe_reboot(scene_plotter,img_i,frame, use_lowes)
+        #    if result.is_keyframe:
+        #        if verbose:
+        #            print(30*"=")
+        #            print(f"Previous keyframe: {self.current_keyframe.frame_data.frame_idx}\n"
+        #                  f"Selected keyframe at frame {frame.frame_idx}")
+        #            end_time = time.time()
+        #            print(f"Initialization took: {end_time - start_time:.3f} seconds")
 
-                if plotting:
-                    self._plot_initialization_results(
-                        img_i, result, self.current_keyframe.frame_data, verbose
-                    )
-                # Update state with new keyframe
-                self.current_keyframe = result
-                self.current_keyframe.frame_data = result.frame_data
-                self.landmarks = result.points_3d
+        #        if plotting:
+        #            self._plot_initialization_results(
+        #                img_i, result, self.current_keyframe.frame_data, verbose
+        #            )
+        #        # Update state with new keyframe
+        #        self.current_keyframe = result
+        #        self.current_keyframe.frame_data = result.frame_data
+        #        self.landmarks = result.points_3d
 
-                return True
+        #        return True
+        frame = self.frame_buffer[self.keyframe_update_index-2]
+        print(frame.frame_idx)
+        img_i = data_loader.load_image(data_params, self.keyframe_update_index, grayscale=True)
+        result = self.select_keyframe_reboot(scene_plotter,img_i,frame, use_lowes)
+        if result.is_keyframe:
+            if verbose:
+                print(30*"=")
+                print(f"Previous keyframe: {self.current_keyframe.frame_data.frame_idx}\n"
+                        f"Selected keyframe at frame {frame.frame_idx}")
+                end_time = time.time()
+                print(f"Initialization took: {end_time - start_time:.3f} seconds")
+
+            if plotting:
+                self._plot_initialization_results(
+                    img_i, result, self.current_keyframe.frame_data, verbose
+                )
+            # Update state with new keyframe
+            self.current_keyframe = result
+            self.current_keyframe.frame_data = result.frame_data
+            self.landmarks = result.points_3d
+
+        return True
+
 
     def _plot_initialization_results(self,
                                    img: np.ndarray,
@@ -510,7 +533,7 @@ class VisualOdometry:
 
             # --- Main Loop Keyframe recompute ---
 
-            if statistics[2] <= 45:
+            if statistics[2] <= 60:
                 self.current_keyframe.frame_data.frame_idx = i
                 self.current_keyframe.frame_data.rotation = R_C_W
                 self.current_keyframe.frame_data.translation = t_C_W
@@ -549,7 +572,7 @@ def main():
     
 
     # Main Loop 
-    while vo.current_keyframe.frame_data.frame_idx < data_params["last_frame"]:
+    while vo.current_keyframe.frame_data.frame_idx < data_params["last_frame"]-1:
         vo.main_loop(data_params, scene_plotter)
         vo.reboot(data_params,scene_plotter, use_lowes=False, plotting=False, verbose=False)
     

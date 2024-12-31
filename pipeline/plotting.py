@@ -166,7 +166,7 @@ class ScenePlotter:
     def __init__(self):
         plt.ion()
         self.fig = plt.figure(figsize=(15, 12))
-        plt.pause(5)
+        #plt.pause(5)
         # Update subplot sizes and positions
         gs = self.fig.add_gridspec(2, 2, height_ratios=[1, 1], width_ratios=[1, 1])
    
@@ -193,7 +193,7 @@ class ScenePlotter:
     def update_plot(self, img, keypoints, points_3d, matched_points, poses, K, title,trajectory=None):
         
         # Local trajectory
-        limit = 30
+        limit = 20
         self.ax.set_xlim(poses[0][0, 3]-limit, poses[0][0, 3]+limit)
         self.ax.set_ylim(poses[0][2, 3]-limit, poses[0][2, 3]+limit)
 
@@ -219,7 +219,7 @@ class ScenePlotter:
                                     c="blue", marker=".", s=5,label='3D Landmarks')
 
         self.scatter2 = self.ax.scatter(trajectory[-30:, 0], trajectory[-30:, 2], 
-                         c='g', linewidth=2, label='Last 30 Camera Poses')
+                         c='g', linewidth=1, label='Last 30 Camera Poses')
 
         # Plot camera poses
         for pose in poses:
@@ -244,14 +244,28 @@ class ScenePlotter:
         # Gobal trajectory 
 
         self.ax_global.set_title('Global Trajectory')
-        max_dist = 1.25*np.max(trajectory) + 10 # Add padding
-        min_dist = 1.25*np.min(trajectory) - 10 # Add padding
-        self.ax_global.set_xlim(min_dist, max_dist)
-        self.ax_global.set_ylim(min_dist, max_dist)
+        # Get the min and max values for padding
+        max_distx = 1.25*np.max(trajectory[:,0]) + 10  
+        max_disty = 1.25*np.max(trajectory[:,2]) + 10
+        min_distx = 1.25*np.min(trajectory[:,0]) - 10
+        min_disty = 1.25*np.min(trajectory[:,2]) - 10
+
+        # Find the overall range needed to keep axes equal
+        total_range_x = max_distx - min_distx
+        total_range_y = max_disty - min_disty
+        max_range = max(total_range_x, total_range_y)
+
+        # Calculate the center points
+        center_x = (max_distx + min_distx) / 2
+        center_y = (max_disty + min_disty) / 2
+
+        # Set new limits maintaining equal scale
+        self.ax_global.set_xlim(center_x - max_range/2, center_x + max_range/2)
+        self.ax_global.set_ylim(center_y - max_range/2, center_y + max_range/2)
 
         if self.scatter3 is None:
             self.scatter3 = self.ax_global.scatter(trajectory[-1, 0], trajectory[-1, 2], 
-                        c='orange', linewidth=2, label='Camera Poses')
+                        c='orange', linewidth=0.5, label='Camera Poses')
             
         #if self.scatter3 is not None:
         #    self.scatter3 = self.ax_global.scatter([], [])
