@@ -166,7 +166,7 @@ class ScenePlotter:
     def __init__(self):
         plt.ion()
         self.fig = plt.figure(figsize=(15, 12))
-        #plt.pause(5)
+        plt.pause(3)
         # Update subplot sizes and positions
         gs = self.fig.add_gridspec(2, 2, height_ratios=[1, 1], width_ratios=[1, 1])
    

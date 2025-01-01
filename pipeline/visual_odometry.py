@@ -226,7 +226,7 @@ class VisualOdometry:
         # is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
 
         # "Fixed" Keyframe distance
-        is_keyframe = frame_idx == self.keyframe_update_index
+        is_keyframe = frame_idx ==  self.keyframe_update_index
         if is_keyframe:
 
             frame_data = FrameData(
@@ -533,7 +533,7 @@ class VisualOdometry:
 
             # --- Main Loop Keyframe recompute ---
 
-            if statistics[2] <= 60:
+            if statistics[2] <= 35:
                 self.current_keyframe.frame_data.frame_idx = i
                 self.current_keyframe.frame_data.rotation = R_C_W
                 self.current_keyframe.frame_data.translation = t_C_W
@@ -545,7 +545,7 @@ class VisualOdometry:
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
 
-    ds = 2
+    ds = 0
 
     paths = {
         "kitti_path": "./Data/kitti05",
