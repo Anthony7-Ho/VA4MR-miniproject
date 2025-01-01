@@ -119,15 +119,15 @@ class VisualOdometry:
             start_time = time.time()
 
         # Process first frame
-        img0 = data_loader.load_image(data_params, 0, grayscale=True)
-        kp0, desc0 = detect_features(img0, np.ones(200))
+        img0 = data_loader.load_image(data_params,  0, grayscale=True)
+        kp0, desc0 = detect_features(img0, None)
         self.current_frame.keypoints = kp0
         self.current_frame.descriptors = desc0
         self.current_keyframe.frame_data.keypoints = kp0
         self.current_keyframe.frame_data.descriptors = desc0
 
         # Search for second keyframe
-        for i in range(1, min(data_params["last_frame"] + 1, 5)):
+        for i in range( 1, min(data_params["last_frame"] + 1, 5)):
             img_i = data_loader.load_image(data_params, i, grayscale=True)
 
             result = self.select_keyframe(img_i, i, use_lowes)
@@ -167,7 +167,7 @@ class VisualOdometry:
         """
         
         # Detect features in current frame
-        curr_kp, curr_desc = detect_features(curr_frame, np.ones(200))
+        curr_kp, curr_desc = detect_features(curr_frame, None)
 
         # Match features between current and previous frame
         _, desc1, desc2, pts1, pts2 = match_features(
@@ -226,7 +226,7 @@ class VisualOdometry:
         # is_keyframe = (keyframe_distance / average_depth) >= self.keyframe_update_ratio
 
         # "Fixed" Keyframe distance
-        is_keyframe = frame_idx ==  self.keyframe_update_index
+        is_keyframe = frame_idx == self.keyframe_update_index
         if is_keyframe:
 
             frame_data = FrameData(
@@ -301,7 +301,7 @@ class VisualOdometry:
         # Dampened rescaling using the scale from the same relative translation calulated using PnP 
         prev_scale = np.linalg.norm(self.current_keyframe.frame_data.translation- frame.translation)
 
-        scale = 1 + 0.99 * (prev_scale-1)
+        scale = 1 + 0.9 * (prev_scale-1)
         points_3d = (scale * frame.rotation @ points_3d.T + 
              frame.translation.reshape(3,1)).T
 
@@ -405,7 +405,6 @@ class VisualOdometry:
 
         #        return True
         frame = self.frame_buffer[self.keyframe_update_index-2]
-        print(frame.frame_idx)
         img_i = data_loader.load_image(data_params, self.keyframe_update_index, grayscale=True)
         result = self.select_keyframe_reboot(scene_plotter,img_i,frame, use_lowes)
         if result.is_keyframe:
@@ -533,7 +532,7 @@ class VisualOdometry:
 
             # --- Main Loop Keyframe recompute ---
 
-            if statistics[2] <= 35:
+            if statistics[2] <= 40:
                 self.current_keyframe.frame_data.frame_idx = i
                 self.current_keyframe.frame_data.rotation = R_C_W
                 self.current_keyframe.frame_data.translation = t_C_W
@@ -545,7 +544,7 @@ class VisualOdometry:
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
 
-    ds = 0
+    ds = 
 
     paths = {
         "kitti_path": "./Data/kitti05",
