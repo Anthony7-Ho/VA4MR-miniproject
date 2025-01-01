@@ -57,7 +57,7 @@ def match_features(
     else:
         bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
         good_matches = bf.match(desc1, desc2)
-        good_matches = sorted(good_matches, key=lambda x: x.distance)[:1500]
+        good_matches = sorted(good_matches, key=lambda x: x.distance)[:1000]
     # good_matches: List of cv2.DMatch objects
     # cv2.DMatch attributes:
     # - queryIdx: Index of the descriptor in the first set

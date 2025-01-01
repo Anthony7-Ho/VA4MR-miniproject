@@ -544,7 +544,7 @@ class VisualOdometry:
 def main():
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
 
-    ds = 
+    ds = 0
 
     paths = {
         "kitti_path": "./Data/kitti05",
