@@ -14,6 +14,7 @@ from functions import (
     get_keyframe_distance,
     get_average_depth,
 )
+
 import data_loader
 
 @dataclass
@@ -100,6 +101,8 @@ class VisualOdometry:
         self.frame_buffer.append(frame_data)
         if len(self.frame_buffer) > self.max_buffer_size:
             self.frame_buffer.pop(0)
+
+    # --------- Initializing ---------
 
     def initialization(self,
                       data_params: dict[str, Any],
@@ -250,10 +253,111 @@ class VisualOdometry:
 
         return KeyframeData(is_keyframe=False)
 
+    def _plot_initialization_results(self,
+                                   img: np.ndarray,
+                                   result: KeyframeData,
+                                   prev_keyframe: FrameData,
+                                   verbose: bool = False) -> None:
+        """Plot initialization results for visualization
+        Args:
+            img: Current keyframe image
+            result: KeyframeData
+            prev_frame: Previous KeyframeData
+        """
+        poses = [
+            np.hstack([prev_keyframe.rotation, prev_keyframe.translation]),
+            np.hstack([result.frame_data.rotation, result.frame_data.translation])
+        ]
+
+        if verbose:
+            # Print pose coordinates for debugging
+            coords_prev = prev_keyframe.translation.flatten()
+            coords_curr = result.frame_data.translation.flatten()
+            print(f"Previous pose coordinates: {coords_prev}")
+            print(f"Current pose coordinates: {coords_curr}")
+            print("IMPORTANT: Not to real scale but relative scale")
+
+        plot_3d_scene(
+            points_3d=result.points_3d,
+            poses=poses,
+            img=img,
+            keypoints=None,
+            matched_points=result.frame_data.correspondences,
+            inliers1=result.inliers1,
+            inliers2=result.inliers2,
+            title="3D Scene Reconstruction"
+        )
+    
+    # ------------ Reboot -------------
+
+    def reboot(self,
+                      data_params: dict[str, Any],
+                      scene_plotter,
+                      use_lowes: bool = False,
+                      plotting: bool = False,
+                      verbose: bool = False) -> bool:
+        """Initialize the VO pipeline using two keyframes
+        Args:
+            data_params: Dictionary containing dataset parameters
+            scene_plotter: Plotting Class
+            use_lowes: Whether to use Lowe's ratio test
+            plotting: Whether to plot results
+            verbose: Debugging prints
+        Returns:
+            bool: True if initialization successful
+        """
+        
+        if self.current_keyframe.frame_data.frame_idx >= data_params["last_frame"]:
+            return
+        
+        if verbose:
+            start_time = time.time()
+
+        self.current_frame = FrameData(
+            keypoints=self.current_keyframe.frame_data.keypoints,
+            descriptors=self.current_keyframe.frame_data.descriptors,
+            correspondences=None,
+            rotation= self.current_keyframe.frame_data.rotation,
+            translation= self.current_keyframe.frame_data.translation,
+            frame_idx= self.current_keyframe.frame_data.frame_idx
+        )
+
+        self.current_keyframe = KeyframeData(
+            is_keyframe=True,
+            points_3d=None,
+            frame_data=self.current_frame,
+            inliers1=None,
+            inliers2=None
+        )
+
+        frame = self.frame_buffer[self.keyframe_update_index-2]
+        img_i = data_loader.load_image(data_params, self.keyframe_update_index, grayscale=True)
+        result = self.select_keyframe_reboot(scene_plotter,img_i,frame,verbose, use_lowes)
+        if result.is_keyframe:
+            if verbose:
+                print(30*"=")
+                print(f"Previous keyframe: {self.current_keyframe.frame_data.frame_idx}\n"
+                        f"Selected keyframe at frame {frame.frame_idx}")
+                end_time = time.time()
+                print(f"Initialization took: {end_time - start_time:.3f} seconds")
+
+            if plotting:
+                self._plot_initialization_results(
+                    img_i, result, self.current_keyframe.frame_data, verbose
+                )
+
+            # Update state with new keyframe
+            self.current_keyframe = result
+            self.current_keyframe.frame_data = result.frame_data
+            self.landmarks = result.points_3d
+
+        return True
+
     def select_keyframe_reboot(self,
                         scene_plotter,
                         img_i: np.ndarray,
                        frame: KeyframeData,
+                       verbose: bool = False,
                        use_lowes: bool = False) -> KeyframeData:
         """Determine if the current frame should be a keyframe
         Args:
@@ -294,10 +398,6 @@ class VisualOdometry:
             inliers2
         )
 
-        # Check keyframe criteria
-        # keyframe_distance = get_keyframe_distance(t_21)
-        # average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
-
         # Dampened rescaling using the scale from the same relative translation calulated using PnP 
         prev_scale = np.linalg.norm(self.current_keyframe.frame_data.translation- frame.translation)
 
@@ -314,9 +414,13 @@ class VisualOdometry:
         adaptive_radius = 50.0 
         mask = distances < adaptive_radius
         
-        # print(f'keyframe_distance: {keyframe_distance}')
-        # print(f'average_depth: {average_depth}')
-        # print(f'fraction: {keyframe_distance / average_depth}')
+        if verbose:
+            # Check keyframe criteria
+            keyframe_distance = get_keyframe_distance(t_21)
+            average_depth = get_average_depth(points_3d, np.eye(3), np.zeros((3,1)))
+            print(f'keyframe_distance: {keyframe_distance}')
+            print(f'average_depth: {average_depth}')
+            print(f'fraction: {keyframe_distance / average_depth}')
         
         is_keyframe = self.current_keyframe.frame_data.frame_idx - frame.frame_idx == self.keyframe_update_index
         
@@ -344,123 +448,7 @@ class VisualOdometry:
 
         return KeyframeData(is_keyframe=False)
 
-    def reboot(self,
-                      data_params: dict[str, Any],
-                      scene_plotter,
-                      use_lowes: bool = False,
-                      plotting: bool = False,
-                      verbose: bool = False) -> bool:
-        """Initialize the VO pipeline using two keyframes
-        Args:
-            data_params: Dictionary containing dataset parameters
-            use_lowes: Whether to use Lowe's ratio test
-            plotting: Whether to plot results
-        Returns:
-            bool: True if initialization successful
-        """
-        
-        if self.current_keyframe.frame_data.frame_idx >= data_params["last_frame"]:
-            return
-        
-        if verbose:
-            start_time = time.time()
-
-        self.current_frame = FrameData(
-            keypoints=self.current_keyframe.frame_data.keypoints,
-            descriptors=self.current_keyframe.frame_data.descriptors,
-            correspondences=None,
-            rotation= self.current_keyframe.frame_data.rotation,
-            translation= self.current_keyframe.frame_data.translation,
-            frame_idx= self.current_keyframe.frame_data.frame_idx
-        )
-
-        self.current_keyframe = KeyframeData(
-            is_keyframe=True,
-            points_3d=None,
-            frame_data=self.current_frame,
-            inliers1=None,
-            inliers2=None
-        )
-
-        #for frame in reversed(self.frame_buffer[:-1]):
-
-        #    img_i = data_loader.load_image(data_params, frame.frame_idx, grayscale=True)
-        #    result = self.select_keyframe_reboot(scene_plotter,img_i,frame, use_lowes)
-        #    if result.is_keyframe:
-        #        if verbose:
-        #            print(30*"=")
-        #            print(f"Previous keyframe: {self.current_keyframe.frame_data.frame_idx}\n"
-        #                  f"Selected keyframe at frame {frame.frame_idx}")
-        #            end_time = time.time()
-        #            print(f"Initialization took: {end_time - start_time:.3f} seconds")
-
-        #        if plotting:
-        #            self._plot_initialization_results(
-        #                img_i, result, self.current_keyframe.frame_data, verbose
-        #            )
-        #        # Update state with new keyframe
-        #        self.current_keyframe = result
-        #        self.current_keyframe.frame_data = result.frame_data
-        #        self.landmarks = result.points_3d
-
-        #        return True
-        frame = self.frame_buffer[self.keyframe_update_index-2]
-        img_i = data_loader.load_image(data_params, self.keyframe_update_index, grayscale=True)
-        result = self.select_keyframe_reboot(scene_plotter,img_i,frame, use_lowes)
-        if result.is_keyframe:
-            if verbose:
-                print(30*"=")
-                print(f"Previous keyframe: {self.current_keyframe.frame_data.frame_idx}\n"
-                        f"Selected keyframe at frame {frame.frame_idx}")
-                end_time = time.time()
-                print(f"Initialization took: {end_time - start_time:.3f} seconds")
-
-            if plotting:
-                self._plot_initialization_results(
-                    img_i, result, self.current_keyframe.frame_data, verbose
-                )
-            # Update state with new keyframe
-            self.current_keyframe = result
-            self.current_keyframe.frame_data = result.frame_data
-            self.landmarks = result.points_3d
-
-        return True
-
-
-    def _plot_initialization_results(self,
-                                   img: np.ndarray,
-                                   result: KeyframeData,
-                                   prev_keyframe: FrameData,
-                                   verbose: bool = False) -> None:
-        """Plot initialization results for visualization
-        Args:
-            img: Current keyframe image
-            result: KeyframeData
-            prev_frame: Previous KeyframeData
-        """
-        poses = [
-            np.hstack([prev_keyframe.rotation, prev_keyframe.translation]),
-            np.hstack([result.frame_data.rotation, result.frame_data.translation])
-        ]
-
-        if verbose:
-            # Print pose coordinates for debugging
-            coords_prev = prev_keyframe.translation.flatten()
-            coords_curr = result.frame_data.translation.flatten()
-            print(f"Previous pose coordinates: {coords_prev}")
-            print(f"Current pose coordinates: {coords_curr}")
-            print("IMPORTANT: Not to real scale but relative scale")
-
-        plot_3d_scene(
-            points_3d=result.points_3d,
-            poses=poses,
-            img=img,
-            keypoints=None,
-            matched_points=result.frame_data.correspondences,
-            inliers1=result.inliers1,
-            inliers2=result.inliers2,
-            title="3D Scene Reconstruction"
-        )
+    # ----------- Main Loop  -----------
 
     def run_pnp(self, matches: list[cv2.DMatch], matched_pts_current_frame: np.ndarray) -> None:
         points_3d = self.landmarks
@@ -540,11 +528,14 @@ class VisualOdometry:
                 self.current_keyframe.frame_data.descriptors = desc_i
                 return i , R_C_W, t_C_W
 
-
 def main():
-    # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
 
-    ds = 0
+    # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
+    ds = 2
+
+    # Debugging (default: False)
+    plotting = False
+    verbose = False
 
     paths = {
         "kitti_path": "./Data/kitti05",
@@ -563,19 +554,16 @@ def main():
 
     # Initialize VO
     vo = VisualOdometry(K)
-    vo.initialization(data_params,use_lowes=False, plotting=False, verbose=False)
+    vo.initialization(data_params,use_lowes=False, plotting=plotting, verbose=verbose)
 
     # Initialize plotter
     scene_plotter = ScenePlotter()
     scene_plotter.initialize_plot()
     
-
     # Main Loop 
-    while vo.current_keyframe.frame_data.frame_idx < data_params["last_frame"]-1:
+    while vo.current_keyframe.frame_data.frame_idx < data_params["last_frame"]:
         vo.main_loop(data_params, scene_plotter)
-        vo.reboot(data_params,scene_plotter, use_lowes=False, plotting=False, verbose=False)
+        vo.reboot(data_params,scene_plotter, use_lowes=False, plotting=plotting, verbose=verbose)
     
-    
-
 if __name__ == "__main__":
     main()

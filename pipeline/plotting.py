@@ -82,6 +82,7 @@ def plot_3d_scene(points_3d, poses, img, keypoints, matched_points, inliers1, in
         title (str): Title for the 3D plot
     """
     fig = plt.figure(figsize=(15, 8))
+    fig.suptitle('Keyframe Selection', fontsize=16)
 
     # Create 3D subplot
     ax_3d = fig.add_subplot(121, projection="3d")
@@ -89,12 +90,14 @@ def plot_3d_scene(points_3d, poses, img, keypoints, matched_points, inliers1, in
 
     # Create 2D subplot
     ax_2d = fig.add_subplot(122)
-    plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, ax_2d)
+    plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, title, ax_2d)
 
     plt.tight_layout()
-    plt.show()
+    plt.show(block=False)
+    plt.pause(5)
+    plt.close()
 
-def plot_feature_matches(img, keypoints, matched_points, title, ax=None):
+def plot_feature_matches(img, keypoints, matched_points, inliers1, inliers2, title, ax=None):
     """
     Visualizes keypoints and feature matches on an image.
     
@@ -125,8 +128,12 @@ def plot_feature_matches(img, keypoints, matched_points, title, ax=None):
         kp_coords = np.array([kp.pt for kp in keypoints])
         ax.scatter(kp_coords[:, 0], kp_coords[:, 1],
                   marker='o', color='blue', s=2, label='Keypoints')
-
-
+        
+    # Draw inlier connections
+    if inliers1 is not None:
+        for pt1, pt2 in zip(inliers1, inliers2):
+            ax.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]],
+                    'g-', linewidth=1)
     # Add legend
     #ax.plot([], [], 'g-', linewidth=2, label=f'Bootstraping Inliers: {len(inliers1)}')
     ax.legend(loc='upper right', bbox_to_anchor=(1, 1))
@@ -166,7 +173,6 @@ class ScenePlotter:
     def __init__(self):
         plt.ion()
         self.fig = plt.figure(figsize=(15, 12))
-        plt.pause(3)
         # Update subplot sizes and positions
         gs = self.fig.add_gridspec(2, 2, height_ratios=[1, 1], width_ratios=[1, 1])
    
@@ -227,13 +233,13 @@ class ScenePlotter:
             direction = pose[:3, 0] * 0.5
             quiver = self.ax.quiver(position[0], position[2],
                                     direction[0], direction[2],
-                                    color="red", scale=5, label=f'Camera e_x')
+                                    color="blue", scale=5, label=f'Camera e_z')
             self.quiver_objects.append(quiver)
             position = pose[:3, 3]
             direction = pose[:3, 2] * 0.5
             quiver = self.ax.quiver(position[0], position[2],
                                     direction[0], direction[2],
-                                    color="blue", scale=5, label=f'Camera e_z')
+                                    color="red", scale=5, label=f'Camera e_x')
             self.quiver_objects.append(quiver)
 
             # Add FOV visualization
@@ -267,9 +273,6 @@ class ScenePlotter:
             self.scatter3 = self.ax_global.scatter(trajectory[-1, 0], trajectory[-1, 2], 
                         c='orange', linewidth=0.5, label='Camera Poses')
             
-        #if self.scatter3 is not None:
-        #    self.scatter3 = self.ax_global.scatter([], [])
-
         self.scatter3.set_offsets(np.c_[trajectory[:, 0], trajectory[:, 2]])
         
             
@@ -277,9 +280,9 @@ class ScenePlotter:
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
 
-        # Screen
+        # Screen Plotting
 
-        plot_feature_matches(img, keypoints, matched_points, title, self.ax_screen)
+        plot_feature_matches(img, keypoints, matched_points, None, None, title, self.ax_screen)
         
     def plot_camera_fov(self, pose, K, near=0.1, far=1.0):
         # Get camera position and orientation
