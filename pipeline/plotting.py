@@ -233,13 +233,13 @@ class ScenePlotter:
             direction = pose[:3, 0] * 0.5
             quiver = self.ax.quiver(position[0], position[2],
                                     direction[0], direction[2],
-                                    color="blue", scale=5, label=f'Camera e_z')
+                                    color="red", scale=5, label=f'Camera e_x')
             self.quiver_objects.append(quiver)
             position = pose[:3, 3]
             direction = pose[:3, 2] * 0.5
             quiver = self.ax.quiver(position[0], position[2],
                                     direction[0], direction[2],
-                                    color="red", scale=5, label=f'Camera e_x')
+                                    color="blue", scale=5, label=f'Camera e_z')
             self.quiver_objects.append(quiver)
 
             # Add FOV visualization
