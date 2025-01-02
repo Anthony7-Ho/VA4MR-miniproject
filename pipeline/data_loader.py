@@ -21,7 +21,7 @@ def setup_dataset(ds, paths):
         data_params["ground_truth"] = np.loadtxt(
             os.path.join(kitti_path, "poses/05.txt")
         )[:, [-9, -8]]
-        data_params["last_frame"] = 2760  # TODO: Ask Jiaxiu why 4540
+        data_params["last_frame"] = 2760 
         data_params["K"] = np.array(
             [[718.856, 0, 607.1928], [0, 718.856, 185.2157], [0, 0, 1]]
         )
@@ -36,7 +36,6 @@ def setup_dataset(ds, paths):
         )[2::2]
         data_params["path"] = images_dir
         data_params["last_frame"] = len(data_params["images"]) - 1
-        # print(data_params['last_frame'])
         data_params["K"] = np.array(
             [[621.18428, 0, 404.0076], [0, 621.18428, 309.05989], [0, 0, 1]]
         )
