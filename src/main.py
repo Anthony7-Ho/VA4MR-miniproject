@@ -564,6 +564,7 @@ def main():
     while vo.current_keyframe.frame_data.frame_idx < data_params["last_frame"]:
         vo.main_loop(data_params, scene_plotter)
         vo.reboot(data_params,scene_plotter, use_lowes=False, plotting=plotting, verbose=verbose)
-    
+
 if __name__ == "__main__":
     main()
+
