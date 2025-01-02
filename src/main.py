@@ -531,7 +531,7 @@ class VisualOdometry:
 def main():
 
     # Dataset selector (0 for KITTI, 1 for Malaga, 2 for Parking)
-    ds = 2
+    ds = 0
 
     # Debugging (default: False)
     plotting = False
