@@ -1,0 +1,13 @@
+name: vamr_project
+channels:
+  - conda-forge
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+  - https://repo.anaconda.com/pkgs/msys2
+dependencies:
+  - python=3.12
+  - matplotlib
+  - numpy
+  - opencv
+  - pillow
+prefix: C:\Users\matsa\miniconda3\envs\vamr_project

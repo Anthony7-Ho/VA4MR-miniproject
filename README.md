@@ -16,7 +16,8 @@ VA4MR-miniproject/
 │   └── plotting.py
 ├── .gitignore
 ├── README.md
-└── requirements.txt
+├── requirements.txt
+└── environment.yml
 ```
 
 ## Data Setup
@@ -28,11 +29,13 @@ VA4MR-miniproject/
 
 ## Running The Code
 
-1. Ensure Python 3.8+ is installed
+1. Ensure Python 3.8+ is installed (Tested on Python 3.12)
 
-2. Install required dependencies:
+2. Install required dependencies (`pip` or `conda`):
    ```bash
    pip install -r requirements.txt
+   # OR
+   conda env create -f environment.yml
    ```
 
 3. Select dataset in `./src/main.py` using the `ds` variable (line 534):
@@ -56,4 +59,3 @@ VA4MR-miniproject/
 * [KITTI 05 Dataset Demo](https://youtu.be/Rv31rvKm_hI)
 * [Malaga Dataset Demo](https://youtu.be/nQ58voV8Q14)
 * [Parking Dataset Demo](https://youtu.be/wTDQpprqmb8)
-```
