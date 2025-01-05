@@ -2,3 +2,5 @@
 */__pycache__
 VA4MR-miniproject.code-workspace
 .venv
+.DS_Store
+Data/*
